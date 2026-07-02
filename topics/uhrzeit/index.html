@@ -355,8 +355,9 @@ function renderHub(){
 
   // Fußzeile
   const foot=el("div",{class:"center",style:"margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  foot.append(el("button",{class:"btn gray",onclick:()=>{location.href="../../index.html";}},"← Themen"));
   foot.append(el("button",{class:"btn gray",onclick:()=>{
-      if(confirm("Allen Fortschritt zurücksetzen?")){Store.reset();renderHub();}
+      if(confirm("Fortschritt in diesem Thema zurücksetzen?")){Store.reset();renderHub();}
     }},"↺ Neu starten"));
   if(Cloud.ready()){
     foot.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();renderCodeScreen(false);}},
