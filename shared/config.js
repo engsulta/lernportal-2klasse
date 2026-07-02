@@ -8,5 +8,5 @@
    (ohne Cloud, ohne Fehler). Sobald echte Werte drinstehen, synchronisiert
    sich der Fortschritt automatisch zwischen PC, iPhone und Android.
    ========================================================================= */
-window.FIREBASE_PROJECT_ID = "DEIN_PROJECT_ID";   // z. B. "lernportal-1a2b3"
-window.FIREBASE_API_KEY    = "DEIN_API_KEY";      // Web-API-Key aus den Projekt-Einstellungen
+window.FIREBASE_PROJECT_ID = "lernportal-2klasse";
+window.FIREBASE_API_KEY    = "AIzaSyBCRQ3qtm83floW1vm_ZBkRlwtFeZdt2xw";
