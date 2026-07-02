@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Lernportal · 2. Klasse</title>
+<link rel="stylesheet" href="shared/styles.css">
+</head>
+<body>
+<canvas id="confetti" style="display:none"></canvas>
+
+<div id="app">
+  <div class="topbar">
+    <div class="brand"><span class="logo">🎒</span><span>Lernportal · 2. Klasse</span></div>
+    <div class="score"><span class="star">★</span><span id="totalStars">0</span></div>
+  </div>
+  <div id="screen"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="shared/config.js"></script>
+<script src="shared/cloud.js"></script>
+<script>
+"use strict";
+
+/* kleiner DOM-Helfer */
+const el=(t,a={},...kids)=>{const n=document.createElement(t);
+  for(const k in a){ if(k==="class")n.className=a[k];
+    else if(k==="html")n.innerHTML=a[k];
+    else if(k.startsWith("on")&&typeof a[k]==="function")n.addEventListener(k.slice(2),a[k]);
+    else if(a[k]!=null)n.setAttribute(k,a[k]); }
+  for(const c of kids){ if(c==null)continue; n.append(c.nodeType?c:document.createTextNode(c)); }
+  return n;};
+const $=s=>document.querySelector(s);
+function updTotal(){ const e=$("#totalStars"); if(e) e.textContent=SchoolCloud.grandTotal(); }
+
+/* =========================================================================
+   THEMEN  –  neues Fach spaeter einfach hier ergaenzen: {id,name,emoji,sub,
+   href, ready:true}. Der Fortschritt jedes Themas synct automatisch mit.
+   ========================================================================= */
+const TOPICS=[
+  { id:"uhrzeit", name:"Uhrzeit", emoji:"⏰", sub:"Die Uhr lesen & einstellen",
+    href:"topics/uhrzeit/index.html", ready:true }
+];
+
+function renderPortal(){
+  updTotal();
+  const wrap=el("div",{class:"screen"});
+  wrap.append(el("h1",{class:"hub-title"},"🎒 Lernportal · 2. Klasse"));
+  wrap.append(el("div",{class:"hub-sub"},"Wähle ein Thema zum Üben!"));
+
+  const grid=el("div",{class:"stations"});
+  TOPICS.forEach((t,i)=>{
+    const stars=SchoolCloud.topicTotal(t.id);
+    const card=el("div",{class:"station"+(t.ready?"":" locked")});
+    card.append(el("span",{class:"num"},String(i+1)));
+    card.append(el("span",{class:"emoji"},t.emoji));
+    card.append(el("div",{class:"nm"},t.name));
+    if(t.sub) card.append(el("div",{class:"muted",style:"font-size:.85rem;margin-top:2px"},t.sub));
+    if(t.ready){
+      card.append(el("div",{style:"margin-top:6px;font-weight:800;color:var(--gold)"},"★ "+stars));
+      card.addEventListener("click",()=>{ location.href=t.href; });
+    }
+    grid.append(card);
+  });
+
+  // Platzhalter, damit klar ist: hier kommen spaeter weitere Faecher dazu
+  const soon=el("div",{class:"station locked"});
+  soon.append(el("span",{class:"emoji"},"➕"));
+  soon.append(el("div",{class:"nm"},"Weitere Themen folgen"));
+  soon.append(el("div",{class:"muted",style:"font-size:.82rem;margin-top:4px"},"z. B. Rechnen, Einmaleins …"));
+  grid.append(soon);
+
+  wrap.append(grid);
+
+  const foot=el("div",{class:"center",style:"margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  foot.append(el("button",{class:"btn gray",onclick:()=>{
+      if(confirm("Wirklich den Fortschritt in ALLEN Themen zurücksetzen?")){ SchoolCloud.resetAll(); renderPortal(); }
+    }},"↺ Alles zurücksetzen"));
+  if(SchoolCloud.ready()){
+    foot.append(el("button",{class:"btn blue",onclick:()=>SchoolCloud.showCodeScreen(false,renderPortal)},
+      "☁️ Code: "+(SchoolCloud.code()||"—")));
+  }
+  wrap.append(foot);
+
+  const host=$("#screen"); host.innerHTML=""; host.append(wrap); window.scrollTo(0,0);
+}
+
+/* Start: gemeinsamen Spielstand laden/synchronisieren, dann Portal zeigen */
+SchoolCloud.bootSync(renderPortal);
+</script>
+</body>
+</html>

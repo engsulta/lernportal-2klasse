@@ -1,0 +1,1343 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Zeit-Abenteuer ⏰ – Die Uhr lernen</title>
+<link rel="stylesheet" href="../../shared/styles.css">
+</head>
+<body>
+<canvas id="confetti"></canvas>
+
+<div id="app">
+  <div class="topbar">
+    <div class="brand"><span class="logo">⏰</span><span>Zeit-Abenteuer</span></div>
+    <div class="score"><span class="star">★</span><span id="totalStars">0</span></div>
+    <button class="iconbtn" id="soundBtn" title="Ton an/aus">🔊</button>
+  </div>
+  <div id="screen"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="../../shared/config.js"></script>
+<script src="../../shared/cloud.js"></script>
+<script>
+"use strict";
+/* =========================================================================
+   KERN-ENGINE
+   ========================================================================= */
+
+/* ---- kleine Helfer ------------------------------------------------------ */
+const $  = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
+function el(tag, attrs={}, ...kids){
+  const n=document.createElement(tag);
+  for(const k in attrs){
+    if(k==="class") n.className=attrs[k];
+    else if(k==="html") n.innerHTML=attrs[k];
+    else if(k.startsWith("on")&&typeof attrs[k]==="function") n.addEventListener(k.slice(2),attrs[k]);
+    else if(attrs[k]!=null) n.setAttribute(k,attrs[k]);
+  }
+  for(const c of kids){ if(c==null) continue; n.append(c.nodeType?c:document.createTextNode(c)); }
+  return n;
+}
+const SVGNS="http://www.w3.org/2000/svg";
+function svgEl(tag,attrs={}){const n=document.createElementNS(SVGNS,tag);for(const k in attrs)n.setAttribute(k,attrs[k]);return n;}
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=rnd(0,i);[a[i],a[j]]=[a[j],a[i]];}return a;}
+const pad=n=>String(n).padStart(2,"0");
+
+/* ---- Zeit-Vokabular (Deutsch, Klasse 2) -------------------------------- */
+function h12(h){h=((h%12)+12)%12;return h===0?12:h;}
+function wordsStd(h,m){              // Standardform: Viertel nach / halb / X vor
+  const H=h12(h), N=h12(h+1);
+  if(m===0)  return H+" Uhr";
+  if(m===15) return "Viertel nach "+H;
+  if(m===30) return "halb "+N;
+  if(m===45) return "Viertel vor "+N;
+  if(m<30)   return m+" nach "+H;
+  return (60-m)+" vor "+N;
+}
+function wordsShort(h,m){            // mundartliche Kurzform aus dem Buch
+  const N=h12(h+1);
+  if(m===15) return "viertel "+N;
+  if(m===45) return "drei viertel "+N;
+  if(m===30) return "halb "+N;
+  if(m===0)  return h12(h)+" Uhr";
+  return null;
+}
+function uhrText(h,m){return m===0?(h+" Uhr"):(h+"."+pad(m)+" Uhr");} // "8.30 Uhr"
+function digital(h,m){return pad(h)+":"+pad(m);}                      // "08:30"
+
+/* ---- Ton (WebAudio, ohne Dateien) -------------------------------------- */
+const Sound=(()=>{
+  let ctx=null, on=true;
+  function ac(){ if(!ctx) ctx=new (window.AudioContext||window.webkitAudioContext)();
+    if(ctx.state==="suspended"){ ctx.resume(); }   // Autoplay-Regeln: bei Bedarf wieder aufwecken
+    return ctx; }
+  // Audio beim ersten Antippen/Klick „entsperren" (Browser erlauben Ton erst nach Nutzer-Geste)
+  ["pointerdown","touchstart","keydown","click"].forEach(ev=>
+    window.addEventListener(ev,()=>{ try{ ac(); }catch(e){} },{passive:true}));
+  function tone(f,t,dur,type="sine",vol=.18){
+    if(!on) return; const c=ac(); const o=c.createOscillator(),g=c.createGain();
+    o.type=type;o.frequency.setValueAtTime(f,t);o.connect(g);g.connect(c.destination);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.01);
+    g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.start(t);o.stop(t+dur);
+  }
+  return {
+    set(v){on=v;},
+    get(){return on;},
+    click(){if(!on)return;const t=ac().currentTime;tone(440,t,.07,"triangle",.12);},
+    tick(){if(!on)return;const t=ac().currentTime;tone(900,t,.03,"square",.05);},
+    good(){if(!on)return;const t=ac().currentTime;[523,659,784].forEach((f,i)=>tone(f,t+i*.09,.18,"sine",.16));},
+    great(){if(!on)return;const t=ac().currentTime;[523,659,784,1046,1318].forEach((f,i)=>tone(f,t+i*.1,.25,"sine",.16));},
+    wrong(){if(!on)return;const t=ac().currentTime;tone(280,t,.18,"sawtooth",.1);tone(200,t+.12,.22,"sawtooth",.1);},
+    win(){if(!on)return;const t=ac().currentTime;[523,587,659,784,880,1046].forEach((f,i)=>tone(f,t+i*.12,.3,"triangle",.16));}
+  };
+})();
+
+/* ---- Konfetti ----------------------------------------------------------- */
+const Confetti=(()=>{
+  const cv=$("#confetti"),cx=cv.getContext("2d");let parts=[],raf=null;
+  function size(){cv.width=innerWidth;cv.height=innerHeight;}
+  addEventListener("resize",size);
+  const COL=["#ff7a59","#ffd23f","#36c98d","#3aa0ff","#9b6bff","#ff79c6"];
+  function burst(n=160){
+    size();cv.style.display="block";
+    for(let i=0;i<n;i++)parts.push({x:innerWidth/2+rnd(-60,60),y:innerHeight/3,
+      vx:rnd(-90,90)/10,vy:rnd(-150,-40)/10,g:.18+Math.random()*.12,
+      s:rnd(6,13),c:pick(COL),r:Math.random()*6,vr:(Math.random()-.5)*.5,life:rnd(80,140)});
+    if(!raf)loop();
+  }
+  function loop(){
+    cx.clearRect(0,0,cv.width,cv.height);
+    parts.forEach(p=>{p.vy+=p.g;p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;p.life--;
+      cx.save();cx.translate(p.x,p.y);cx.rotate(p.r);cx.fillStyle=p.c;
+      cx.fillRect(-p.s/2,-p.s/2,p.s,p.s*.6);cx.restore();});
+    parts=parts.filter(p=>p.life>0&&p.y<cv.height+30);
+    if(parts.length)raf=requestAnimationFrame(loop);
+    else{raf=null;cv.style.display="none";}
+  }
+  return {burst};
+})();
+
+/* ---- Toast -------------------------------------------------------------- */
+let toastT=null;
+function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),1800);}
+
+/* ---- Speicher: gemeinsamer Cloud-/Fortschritt-Store (siehe shared/cloud.js) ---
+   Dieses Thema heisst "uhrzeit". Alle Faecher teilen sich EINEN Familien-Code
+   und EIN Firebase-Projekt; jedes Thema hat seinen eigenen Fortschritt.       */
+const Store = SchoolCloud.store("uhrzeit");
+const Cloud = { ready: SchoolCloud.ready };
+function renderCodeScreen(firstRun){ SchoolCloud.showCodeScreen(firstRun, routeStart); }
+
+/* ---- Maskottchen-SVG: "Tikki die Eule" --------------------------------- */
+function mascotSVG(mood="happy"){
+  // freundliche Eule; mood: happy | think | cheer | wow
+  const eyes = mood==="think" ? `<circle cx="78" cy="78" r="6" fill="#243b55"/><circle cx="122" cy="78" r="6" fill="#243b55"/>`
+            : `<circle cx="78" cy="76" r="8" fill="#243b55"/><circle cx="122" cy="76" r="8" fill="#243b55"/>
+               <circle cx="81" cy="73" r="3" fill="#fff"/><circle cx="125" cy="73" r="3" fill="#fff"/>`;
+  const wing = mood==="cheer"||mood==="wow" ? `<path d="M40 95 Q20 70 30 60 Q45 80 55 100 Z" fill="#7a4fd0"/>
+               <path d="M160 95 Q180 70 170 60 Q155 80 145 100 Z" fill="#7a4fd0"/>`
+            : `<path d="M44 100 Q28 110 36 132 Q52 120 58 104 Z" fill="#7a4fd0"/>
+               <path d="M156 100 Q172 110 164 132 Q148 120 142 104 Z" fill="#7a4fd0"/>`;
+  const mouth = mood==="wow" ? `<ellipse cx="100" cy="100" rx="9" ry="12" fill="#e8943a"/>` : "";
+  return `<svg class="mascot" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <ellipse cx="100" cy="178" rx="46" ry="10" fill="rgba(0,0,0,.12)"/>
+    <path d="M100 30 C55 30 42 70 42 110 C42 160 70 180 100 180 C130 180 158 160 158 110 C158 70 145 30 100 30Z" fill="#9b6bff"/>
+    <path d="M100 44 C72 44 60 76 60 110 C60 152 80 170 100 170 C120 170 140 152 140 110 C140 76 128 44 100 44Z" fill="#c9b3ff"/>
+    ${wing}
+    <circle cx="78" cy="78" r="22" fill="#fff"/><circle cx="122" cy="78" r="22" fill="#fff"/>
+    ${eyes}
+    <path d="M92 92 L108 92 L100 104 Z" fill="#ff9a3d"/>
+    ${mouth}
+    <path d="M70 40 L84 56 M130 40 L116 56" stroke="#7a4fd0" stroke-width="6" stroke-linecap="round"/>
+    <path d="M86 150 q14 12 28 0" stroke="#7a4fd0" stroke-width="0" fill="none"/>
+  </svg>`;
+}
+
+/* ---- Maskottchen-Zeile (Sprechblase) ----------------------------------- */
+function mascotRow(text,mood="happy"){
+  const row=el("div",{class:"mascot-row"});
+  row.innerHTML=mascotSVG(mood)+`<div class="bubble">${text}</div>`;
+  return row;
+}
+
+/* =========================================================================
+   UHR-KOMPONENTE  (SVG, zieh- und einstellbar)
+   ========================================================================= */
+function Clock(opts={}){
+  // opts: h,m, show24(bool), draggable(bool), minStep(1|5|15|30), onChange(fn)
+  const st={h:opts.h??9, m:opts.m??0, show24:!!opts.show24,
+            drag:!!opts.draggable, step:opts.minStep||1, onChange:opts.onChange||null};
+  const C=120,R=110;
+  const svg=svgEl("svg",{class:"clock",viewBox:"0 0 240 240"});
+  // Verlauf
+  const defs=svgEl("defs");
+  defs.innerHTML=`<radialGradient id="faceGrad" cx="50%" cy="42%" r="65%">
+      <stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#eaf3ff"/></radialGradient>`;
+  svg.append(defs);
+  svg.append(svgEl("circle",{class:"face",cx:C,cy:C,r:R}));
+  // Minutenstriche + Stundenstriche
+  for(let i=0;i<60;i++){
+    const a=i*6*Math.PI/180, big=i%5===0;
+    const r1=R-(big?16:8), r2=R-3;
+    svg.append(svgEl("line",{class:"tick"+(big?" big":""),
+      x1:C+r1*Math.sin(a),y1:C-r1*Math.cos(a),x2:C+r2*Math.sin(a),y2:C-r2*Math.cos(a)}));
+  }
+  // Zahlen 1–12
+  for(let n=1;n<=12;n++){
+    const a=n*30*Math.PI/180, rr=R-32;
+    const t=svgEl("text",{class:"num",x:C+rr*Math.sin(a),y:C-rr*Math.cos(a),"font-size":"22"});
+    t.textContent=n; svg.append(t);
+  }
+  // 24h-Zahlen (innen) optional
+  const ring24=svgEl("g");
+  for(let k=1;k<=12;k++){
+    const a=k*30*Math.PI/180, rr=R-52;
+    const t=svgEl("text",{class:"num24",x:C+rr*Math.sin(a),y:C-rr*Math.cos(a)});
+    t.textContent = (k+12);            // 13..24 (24 oben bei der 12)
+    ring24.append(t);
+  }
+  if(st.show24) svg.append(ring24);
+  // Zeiger
+  const hHit=svgEl("line",{class:"hand hit",x1:C,y1:C,x2:C,y2:C-50});
+  const hHour=svgEl("line",{class:"hand hour",x1:C,y1:C,x2:C,y2:C-58});
+  const mHit=svgEl("line",{class:"hand hit",x1:C,y1:C,x2:C,y2:C-84});
+  const mMin=svgEl("line",{class:"hand minute",x1:C,y1:C,x2:C,y2:C-88});
+  svg.append(hHit,hHour,mHit,mMin,svgEl("circle",{class:"cap",cx:C,cy:C,r:8}));
+
+  function render(){
+    const ha=(h12(st.h)%12)*30 + st.m*0.5;
+    const ma=st.m*6;
+    hHour.setAttribute("transform",`rotate(${ha} ${C} ${C})`);
+    hHit .setAttribute("transform",`rotate(${ha} ${C} ${C})`);
+    mMin .setAttribute("transform",`rotate(${ma} ${C} ${C})`);
+    mHit .setAttribute("transform",`rotate(${ma} ${C} ${C})`);
+    if(st.onChange) st.onChange(st.h,st.m);
+  }
+  // Ziehen
+  function angleFromEvent(ev){
+    const r=svg.getBoundingClientRect();
+    const px=(ev.touches?ev.touches[0]:ev).clientX, py=(ev.touches?ev.touches[0]:ev).clientY;
+    const cx=r.left+r.width/2, cy=r.top+r.height/2;
+    const dx=px-cx, dy=py-cy;
+    let a=Math.atan2(dx,-dy)*180/Math.PI; if(a<0)a+=360; return a;
+  }
+  let active=null;
+  function down(which,ev){ if(!st.drag)return; ev.preventDefault(); active=which;
+    (which==="m"?mMin:hHour).classList.add("dragging");
+    move(ev);
+  }
+  function move(ev){
+    if(!active)return; ev.preventDefault();
+    const a=angleFromEvent(ev);
+    if(active==="m"){
+      let m=Math.round(a/6); m=Math.round(m/st.step)*st.step; m=((m%60)+60)%60;
+      if(m!==st.m){Sound.tick();}
+      st.m=m;
+    }else{
+      let h=Math.round(a/30); h=((h%12)+12)%12; if(h===0)h=12;
+      // behalte 12/24-Kontext grob bei
+      const was24 = st.h>=12 && st.h!==12 ? true : (st.h===0);
+      st.h = h===12?12:h;
+    }
+    render();
+  }
+  function up(){ if(!active)return; (active==="m"?mMin:hHour).classList.remove("dragging"); active=null; }
+  hHit.addEventListener("pointerdown",e=>down("h",e));
+  mHit.addEventListener("pointerdown",e=>down("m",e));
+  // ziehbarer Bereich auch direkt auf den Zeigern
+  hHour.addEventListener("pointerdown",e=>down("h",e));
+  mMin .addEventListener("pointerdown",e=>down("m",e));
+  window.addEventListener("pointermove",move);
+  window.addEventListener("pointerup",up);
+
+  render();
+  return {
+    svg,
+    set(h,m){st.h=h;if(m!=null)st.m=m;render();},
+    get(){return {h:st.h,m:st.m};},
+    setDrag(v){st.drag=v;[hHour,mMin].forEach(e=>e.style.cursor=v?"grab":"default");},
+    setStep(s){st.step=s;},
+    show24(v){if(v&&!ring24.parentNode)svg.insertBefore(ring24,hHit);else if(!v&&ring24.parentNode)ring24.remove();st.show24=v;},
+    glow(v){svg.classList.toggle("glow",!!v);}
+  };
+}
+
+/* +/- Steuerung für eine Uhr (kindgerecht, touch-freundlich) */
+function clockControls(clock,{hourStep=1,minStep=1,showHour=true,showMin=true,hour24=true}={}){
+  const wrap=el("div",{class:"setrow"});
+  function grp(label,cls,onMinus,onPlus){
+    const g=el("div",{class:"setgrp"});
+    g.append(el("div",{class:"lab"},label));
+    const ctr=el("div",{class:"ctr"});
+    ctr.append(
+      el("button",{class:"stepbtn "+cls,onclick:()=>{Sound.click();onMinus();}},"−"),
+      el("span",{class:"val "+cls+"v"},"--"),
+      el("button",{class:"stepbtn "+cls,onclick:()=>{Sound.click();onPlus();}},"+")
+    );
+    g.append(ctr);return g;
+  }
+  function upd(){const {h,m}=clock.get();
+    const hv=wrap.querySelector(".hv"),mv=wrap.querySelector(".mv");
+    if(hv)hv.textContent = hour24 ? h : h12(h);
+    if(mv)mv.textContent=pad(m);}
+  if(showHour)wrap.append(grp("Stunde","h",
+    ()=>{let{h}=clock.get(); h = hour24 ? (h-hourStep+24)%24 : (h12(h)-hourStep<1?12:h12(h)-hourStep); clock.set(h);upd();},
+    ()=>{let{h}=clock.get(); h = hour24 ? (h+hourStep)%24 : (h12(h)+hourStep>12?1:h12(h)+hourStep); clock.set(h);upd();}));
+  if(showMin)wrap.append(grp("Minute","m",
+    ()=>{let{h,m}=clock.get();m-=minStep;if(m<0){m+=60;}clock.set(h,m);upd();},
+    ()=>{let{h,m}=clock.get();m+=minStep;if(m>=60){m-=60;}clock.set(h,m);upd();}));
+  upd();
+  return wrap;
+}
+
+/* =========================================================================
+   BILDSCHIRM-STEUERUNG  (Hub  +  Station-Ablauf)
+   ========================================================================= */
+const STATIONS=[
+  {id:"tageszeiten", n:"Tageszeiten", e:"🌅", c:"--brand"},
+  {id:"dieuhr",      n:"Die Uhr kennenlernen", e:"🕰️", c:"--blue"},
+  {id:"vollehalbe",  n:"Volle & halbe Stunden", e:"🕘", c:"--green"},
+  {id:"viertel",     n:"Viertelstunden", e:"🕓", c:"--purple"},
+  {id:"minuten",     n:"Minuten genau", e:"🕔", c:"--pink"},
+  {id:"digital",     n:"Digital & 24 Stunden", e:"📟", c:"--blue"},
+  {id:"zeitspannen", n:"Zeitspannen", e:"⏳", c:"--brand"},
+  {id:"einheiten",   n:"Stunden · Minuten · Sekunden", e:"⏱️", c:"--green"},
+  {id:"meister",     n:"Meister-Challenge", e:"🏆", c:"--gold", master:true},
+];
+const STATION_DATA={}; // wird im Stations-Abschnitt befüllt
+
+function setScreen(node){const s=$("#screen");s.innerHTML="";s.append(node);window.scrollTo(0,0);}
+function updTotal(){$("#totalStars").textContent=Store.total();}
+
+function renderHub(){
+  updTotal();
+  const wrap=el("div",{class:"screen"});
+  wrap.append(el("h1",{class:"hub-title"},"⏰ Zeit-Abenteuer"));
+  wrap.append(el("div",{class:"hub-sub"},"Werde zum Uhren-Meister! Wähle eine Station."));
+  wrap.append(mascotRow(welcomeText(),"happy"));
+
+  // „Weitermachen"-Knopf, falls eine Station noch offen ist
+  const prog=Store.getProgress();
+  if(prog && STATION_DATA[prog.id]){
+    const ps=STATIONS.find(x=>x.id===prog.id);
+    const cont=el("div",{class:"center",style:"margin:2px 0 12px"});
+    cont.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();startStation(prog.id,prog);}},
+      "▶ Weitermachen: "+(ps?ps.n:"")+" – Aufgabe "+((prog.i||0)+1)));
+    wrap.append(cont);
+  }
+
+  const grid=el("div",{class:"stations"});
+  let prevDone=true;
+  STATIONS.forEach((s,i)=>{
+    const stars=Store.stars(s.id), done=Store.data.done[s.id];
+    const locked = !prevDone && !done;       // nächste Station erst nach Vorgänger
+    const card=el("div",{class:"station"+(s.master?" master":"")+(done?" done":"")+(locked?" locked":"")});
+    card.style.borderColor = done? "var(--gold)":"transparent";
+    card.append(el("span",{class:"num"},String(i+1)));
+    card.append(el("span",{class:"emoji"},s.e));
+    card.append(el("div",{class:"nm"},s.n));
+    const sd=el("div",{class:"stars"});
+    for(let k=0;k<3;k++)sd.append(el("span",{class:"s"+(k<stars?" on":"")},"★"));
+    card.append(sd);
+    if(!locked) card.addEventListener("click",()=>{Sound.click();startStation(s.id);});
+    grid.append(card);
+    prevDone = done; // Freischaltung der nächsten Station
+  });
+  wrap.append(grid);
+
+  // Fußzeile
+  const foot=el("div",{class:"center",style:"margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  foot.append(el("button",{class:"btn gray",onclick:()=>{
+      if(confirm("Allen Fortschritt zurücksetzen?")){Store.reset();renderHub();}
+    }},"↺ Neu starten"));
+  if(Cloud.ready()){
+    foot.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();renderCodeScreen(false);}},
+      "☁️ Code: "+(SchoolCloud.code()||"—")));
+  }
+  wrap.append(foot);
+  setScreen(wrap);
+}
+function welcomeText(){
+  const t=Store.total();
+  if(t===0) return "Hallo! Ich bin <b>Tikki die Eule</b> 🦉. Zusammen lernen wir die <b>Uhr</b> – Schritt für Schritt mit vielen Spielen!";
+  if(t<8)  return "Schön, dass du wieder da bist! Du hast schon <b>"+t+" Sterne</b> ⭐ gesammelt. Weiter geht's!";
+  if(t<20) return "Super Fortschritt – <b>"+t+" Sterne</b>! Du wirst immer besser im Uhrenlesen. 💪";
+  return "Wow, <b>"+t+" Sterne</b>! Du bist ein echter Zeit-Profi. 🏆";
+}
+
+/* ---- Station-Ablauf: Lernkarten -> Übungen -> Ergebnis ----------------- */
+function startStation(id,resume){
+  const data=STATION_DATA[id];
+  if(!data){toast("Diese Station wird noch gebaut …");return;}
+  const teach=(typeof data.teach==="function"?data.teach():data.teach)||[];
+  const exercises=(typeof data.exercises==="function"?data.exercises():data.exercises)||[];
+  let ti=0;
+  // Beim Weitermachen direkt zu den Übungen springen (Lernkarten überspringen)
+  if(resume){ runExercises(id,exercises,resume); return; }
+  if(teach.length) showTeach(); else runExercises(id,exercises);
+
+  function showTeach(){
+    const card=teach[ti];
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id,"Erklärung "+(ti+1)+"/"+teach.length));
+    const body=el("div",{class:"card"});
+    if(card.render){ card.render(body); }
+    else {
+      if(card.title) body.append(el("h2",{class:"center"},card.title));
+      if(card.html)  body.append(el("div",{class:"center",html:card.html}));
+    }
+    scr.append(card.mascot? mascotRow(card.mascot,card.mood||"think"):document.createTextNode(""));
+    scr.append(body);
+    const nav=el("div",{class:"center",style:"margin-top:8px"});
+    nav.append(el("button",{class:"btn lg green",onclick:()=>{
+      Sound.click(); ti++;
+      if(ti<teach.length) showTeach(); else runExercises(id,exercises);
+    }}, ti<teach.length-1?"Weiter →":"Los, üben! ✏️"));
+    scr.append(nav);
+    setScreen(scr);
+  }
+}
+
+function stationHeader(id,step){
+  const s=STATIONS.find(x=>x.id===id);
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",
+    onclick:()=>{Sound.click();renderHub();}},"← Karte"));
+  bar.append(el("div",{class:"brand"},el("span",{},s.e+" "+s.n)));
+  bar.append(el("div",{class:"steplabel"},step||""));
+  return bar;
+}
+
+/* ---- Übungs-Engine ------------------------------------------------------ */
+function runExercises(id,list,resume){
+  let i=resume && resume.i<list.length ? resume.i : 0,
+      correctCount=resume ? resume.correctCount||0 : 0,
+      attemptsThis=0,
+      wrongTotal=resume ? resume.wrongTotal||0 : 0;
+  next();
+
+  function next(){
+    if(i>=list.length){ return finish(); }
+    // Position sichern, damit man nach einem Neuladen genau hier weitermacht
+    Store.saveProgress({id, i, correctCount, wrongTotal});
+    const ex=list[i]; attemptsThis=0;
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id));
+    // Fortschritt
+    const pr=el("div",{class:"card"});
+    const bar=el("div",{class:"progress"});const fill=el("i");bar.append(fill);
+    pr.append(bar);
+    fill.style.width=(i/list.length*100)+"%";
+    pr.append(el("div",{class:"steplabel"},"Aufgabe "+(i+1)+" von "+list.length));
+    scr.append(pr);
+
+    const host=el("div",{class:"card"});
+    scr.append(host);
+    const fb=el("div",{class:"feedback"});scr.append(fb);
+    setScreen(scr);
+
+    const api={
+      done:(ok)=>{ // wird vom Renderer gerufen
+        if(ok){correctCount++; fill.style.width=((i+1)/list.length*100)+"%";}
+        afterAnswer(ok,ex,fb,()=>{ i++; next(); });
+      },
+      wrong:()=>{attemptsThis++; wrongTotal++;},
+      attempts:()=>attemptsThis,
+      feedback:fb
+    };
+    renderExercise(ex,host,api);
+  }
+
+  function afterAnswer(ok,ex,fb,cont){
+    fb.className="feedback show "+(ok?"ok":"no");
+    fb.innerHTML="";
+    fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+    const msg=el("div");
+    msg.innerHTML = ok ? pick(["Super gemacht!","Richtig! ⭐","Klasse!","Genau richtig!","Toll!"])
+                       : (ex.explain||"Schau noch einmal genau hin.");
+    fb.append(msg);
+    if(ok)Sound.good(); else Sound.wrong();
+    const btn=el("button",{class:"btn "+(ok?"green":"blue"),style:"margin-left:auto",
+      onclick:()=>{Sound.click();fb.classList.remove("show");cont();}}, ok?"Weiter →":"Nochmal versuchen");
+    if(ok){ fb.append(btn); }
+    else {
+      // bei Fehler: kurzer Hinweis, dann erneut dieselbe Aufgabe
+      const b2=el("button",{class:"btn blue",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");retry();}},"Nochmal →");
+      fb.append(b2);
+    }
+    function retry(){ // gleiche Aufgabe neu rendern
+      const host=fb.previousSibling; // card
+      host.innerHTML=""; renderExercise(ex,host,{
+        done:(ok2)=>{ if(ok2){correctCount++;} afterAnswer(ok2,ex,fb,()=>{i++;next();}); },
+        wrong:()=>{wrongTotal++;}, attempts:()=>1, feedback:fb
+      });
+    }
+  }
+
+  function finish(){
+    Store.clearProgress();   // Station fertig – kein offener Fortschritt mehr
+    // Sterne: 3 (keine Fehler), 2 (wenige), 1 (geschafft)
+    let stars = wrongTotal===0?3 : (wrongTotal<=2?2:1);
+    Store.setStars(id,stars); updTotal();
+    const isMaster = id==="meister";
+    const scr=el("div",{class:"result screen"});
+    scr.append(stationHeader(id,"Geschafft!"));
+    const card=el("div",{class:"card center"});
+    card.append(el("div",{class:"huge"}, isMaster?"🏆 MEISTER! 🏆":"Geschafft! 🎉"));
+    const st=el("div",{class:"bigstars"});
+    for(let k=0;k<3;k++)st.append(el("span",{class:"s"},"★"));
+    card.append(st);
+    card.append(el("p",{class:"big"}, starMsg(stars)));
+    if(isMaster){
+      card.append(el("div",{class:"badge"},"🏅"));
+      card.append(el("p",{},"Du hast die <b>Uhrzeit gemeistert</b>! Du kannst die Uhr lesen, einstellen und mit Zeit rechnen."));
+      card.lastChild.innerHTML=card.lastChild.textContent; // allow <b>
+    }
+    const nav=el("div",{style:"margin-top:10px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+    nav.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();renderHub();}},"🗺️ Zur Karte"));
+    nav.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();startStation(id);}},"↻ Nochmal"));
+    // nächste Station
+    const idx=STATIONS.findIndex(s=>s.id===id);
+    if(idx<STATIONS.length-1){
+      nav.append(el("button",{class:"btn",onclick:()=>{Sound.click();startStation(STATIONS[idx+1].id);}},
+        "Nächste Station →"));
+    }
+    card.append(nav);
+    scr.append(card);
+    setScreen(scr);
+    // Animationen
+    setTimeout(()=>{ const ss=$$(".bigstars .s");
+      for(let k=0;k<stars;k++)setTimeout(()=>{ss[k].classList.add("on");Sound.good();},k*350);
+    },200);
+    if(stars>=3||isMaster){Confetti.burst(isMaster?260:160);Sound.win();}
+    else if(stars===2){Confetti.burst(90);Sound.great();}
+  }
+  function starMsg(s){return s===3?"Perfekt – ganz ohne Fehler!":s===2?"Sehr gut gemacht!":"Geschafft – Übung macht den Meister!";}
+}
+
+/* =========================================================================
+   ÜBUNGS-RENDERER  (ein Typ-Schalter für alle Aufgabenarten)
+   Aufgaben-Spezifikation:
+     {type:"info",  render(host,api)}                      eigenes Mini-Spiel
+     {type:"mc", q, options:[{label|clock|html, ok}], explain}
+     {type:"readClock", h,m, options:[...], explain}       (Sonderfall von mc)
+     {type:"setClock", target:{h,m}, prompt, minStep, check, explain}
+     {type:"sort", q, items:[{t,b}], buckets:[{id,head,emoji}], explain}
+     {type:"match", q, pairs:[[a,b]], render?, explain}
+     {type:"order", q, items:[{label,val}], explain}
+     {type:"tf", q, answer(bool), explain}
+     {type:"input", q, answer, suffix, explain}
+   ========================================================================= */
+function renderExercise(ex,host,api){
+  const fn=RENDER[ex.type]||RENDER.mc;
+  fn(ex,host,api);
+}
+const RENDER={};
+
+/* freie Render-Funktion (für Lern-/Sonderspiele) */
+RENDER.info=(ex,host,api)=>{ ex.render(host,api); };
+
+/* Multiple-Choice (Text, Uhr oder HTML als Option) */
+RENDER.mc=(ex,host,api)=>{
+  if(ex.mascot)host.append(mascotRow(ex.mascot,ex.mood||"think"));
+  if(ex.q)host.append(el("div",{class:"center big",html:ex.q}));
+  if(ex.clock){ const c=Clock({h:ex.clock.h,m:ex.clock.m,show24:ex.clock.show24});
+    const w=el("div",{class:"clock-wrap"});w.append(c.svg);host.append(w);}
+  if(ex.digital){host.append(el("div",{class:"center",style:"margin:10px"},
+     el("span",{class:"digital"+(ex.digital.red?" red":"")},ex.digital.text)));}
+  if(ex.hint)host.append(hintBlock(ex.hint));
+  const grid=el("div",{class:"options"+(ex.cols2?" cols2":"")});
+  shuffle(ex.options.map((o,idx)=>({o,idx}))).forEach(({o})=>{
+    const opt=el("div",{class:"opt"});
+    if(o.clock){const c=Clock({h:o.clock.h,m:o.clock.m,show24:o.clock.show24});
+      c.svg.style.width="120px";c.svg.style.height="120px";opt.append(c.svg);}
+    else if(o.html)opt.innerHTML=o.html;
+    else opt.append(document.createTextNode(o.label));
+    opt.addEventListener("click",()=>{
+      if(grid.dataset.lock)return;
+      grid.dataset.lock="1"; grid.style.pointerEvents="none";
+      if(o.ok){opt.classList.add("correct");api.done(true);}
+      else{opt.classList.add("wrong");api.wrong();api.done(false);}
+    });
+    grid.append(opt);
+  });
+  host.append(grid);
+};
+RENDER.readClock=(ex,host,api)=>{ RENDER.mc(ex,host,api); };
+
+/* Uhr einstellen (mit +/- Knöpfen, prüft Stunde&Minute) */
+RENDER.setClock=(ex,host,api)=>{
+  if(ex.mascot)host.append(mascotRow(ex.mascot,"think"));
+  host.append(el("div",{class:"center big",html:ex.prompt}));
+  if(ex.hint)host.append(hintBlock(ex.hint));
+  const start=ex.start||{h:12,m:0};
+  const c=Clock({h:start.h,m:start.m,show24:ex.show24,draggable:!!ex.drag,minStep:ex.minStep||1});
+  const w=el("div",{class:"clock-wrap"});w.append(c.svg);
+  if(ex.show24)c.show24(true);
+  host.append(w);
+  host.append(clockControls(c,{hourStep:ex.hourStep||1,minStep:ex.minStep||1,
+    showHour:ex.showHour!==false,showMin:ex.showMin!==false,
+    hour24:!!(ex.match24||ex.show24)}));
+  const chk=el("div",{class:"center",style:"margin-top:12px"});
+  chk.append(el("button",{class:"btn green lg",onclick:()=>{
+    const {h,m}=c.get(); const t=ex.target;
+    const okH = ex.ignoreHour? true : (ex.match24? h===t.h : h12(h)===h12(t.h));
+    const okM = m===t.m;
+    if(okH&&okM){c.glow(true);api.done(true);}
+    else{api.wrong();
+      if(!okM&&okH)toast("Die Minuten stimmen noch nicht 🕐");
+      else if(okM&&!okH)toast("Die Stunde stimmt noch nicht 🕐");
+      else toast("Stunde und Minute prüfen 🕐");
+      api.done(false);
+    }
+  }},"✓ Fertig"));
+  host.append(chk);
+};
+
+/* Sortieren in Eimer (Drag & Drop, touch-fähig) */
+RENDER.sort=(ex,host,api)=>{
+  if(ex.mascot)host.append(mascotRow(ex.mascot,"think"));
+  host.append(el("div",{class:"center big",html:ex.q}));
+  const pool=el("div",{class:"dnd-pool"});
+  const buckets=el("div",{class:"buckets"});
+  const items=shuffle(ex.items.map((it,idx)=>({...it,idx})));
+  const need=items.length; let placed=0;
+  items.forEach(it=>{
+    const chip=el("div",{class:"chip",draggable:"false"});chip.textContent=it.t;chip.dataset.b=it.b;
+    makeDraggable(chip);pool.append(chip);
+  });
+  ex.buckets.forEach(b=>{
+    const bk=el("div",{class:"bucket"});bk.dataset.id=b.id;
+    bk.append(el("div",{class:"bemoji"},b.emoji||""));
+    bk.append(el("div",{class:"bhead"},b.head));
+    const drop=el("div",{class:"bdrop"});bk.append(drop);
+    buckets.append(bk);
+  });
+  host.append(pool);host.append(buckets);
+
+  function makeDraggable(chip){
+    let drag=null,ox=0,oy=0,ghostParent=null;
+    chip.addEventListener("pointerdown",e=>{
+      if(chip.classList.contains("placed"))return;
+      e.preventDefault();drag=chip;chip.setPointerCapture(e.pointerId);
+      const r=chip.getBoundingClientRect();ox=e.clientX-r.left;oy=e.clientY-r.top;
+      chip.classList.add("drag");chip.style.position="fixed";chip.style.zIndex=60;
+      chip.style.left=(e.clientX-ox)+"px";chip.style.top=(e.clientY-oy)+"px";
+      document.body.append(chip);
+    });
+    chip.addEventListener("pointermove",e=>{
+      if(!drag)return;e.preventDefault();
+      chip.style.left=(e.clientX-ox)+"px";chip.style.top=(e.clientY-oy)+"px";
+      $$(".bucket",buckets).forEach(bk=>{
+        const r=bk.getBoundingClientRect();
+        const over=e.clientX>r.left&&e.clientX<r.right&&e.clientY>r.top&&e.clientY<r.bottom;
+        bk.classList.toggle("over",over);
+      });
+    });
+    chip.addEventListener("pointerup",e=>{
+      if(!drag)return;drag=null;chip.classList.remove("drag");
+      let target=null;
+      $$(".bucket",buckets).forEach(bk=>{
+        const r=bk.getBoundingClientRect();
+        if(e.clientX>r.left&&e.clientX<r.right&&e.clientY>r.top&&e.clientY<r.bottom)target=bk;
+        bk.classList.remove("over");
+      });
+      chip.style.position="";chip.style.left="";chip.style.top="";chip.style.zIndex="";
+      if(target&&target.dataset.id===chip.dataset.b){
+        chip.classList.add("placed");Sound.good();
+        target.querySelector(".bdrop").append(chip);
+        placed++;
+        if(placed>=need){ setTimeout(()=>api.done(true),250); }
+      }else if(target){
+        Sound.wrong();api.wrong();chip.classList.add("drag");
+        setTimeout(()=>chip.classList.remove("drag"),200);
+        pool.append(chip);toast(ex.wrongHint||"Das passt hier nicht – versuch es nochmal!");
+      }else{
+        pool.append(chip);
+      }
+    });
+  }
+};
+
+/* Paare verbinden (Klicken: links wählen, rechts wählen) */
+RENDER.match=(ex,host,api)=>{
+  if(ex.mascot)host.append(mascotRow(ex.mascot,"think"));
+  host.append(el("div",{class:"center big",html:ex.q}));
+  const cols=el("div",{class:"matchcols"});
+  const left=el("div",{class:"matchcol"}),right=el("div",{class:"matchcol"});
+  cols.append(left,right);host.append(cols);
+  const L=shuffle(ex.pairs.map((p,i)=>({v:p[0],i}))),
+        R=shuffle(ex.pairs.map((p,i)=>({v:p[1],i})));
+  let sel=null, doneN=0;
+  function mk(side,obj){
+    const it=el("div",{class:"matchitem"});
+    if(typeof obj.v==="object"&&obj.v.clock){const c=Clock(obj.v.clock);c.svg.style.width="100px";c.svg.style.height="100px";it.append(c.svg);}
+    else it.innerHTML=obj.v;
+    it.dataset.i=obj.i;it.dataset.side=side;
+    it.addEventListener("click",()=>{
+      if(it.classList.contains("done"))return;
+      if(!sel){sel=it;it.classList.add("sel");Sound.click();return;}
+      if(sel===it){it.classList.remove("sel");sel=null;return;}
+      if(sel.dataset.side===side){sel.classList.remove("sel");sel=it;it.classList.add("sel");return;}
+      // Paar prüfen
+      if(sel.dataset.i===it.dataset.i){
+        sel.classList.remove("sel");sel.classList.add("done");it.classList.add("done");
+        Sound.good();sel=null;doneN++;
+        if(doneN>=ex.pairs.length)setTimeout(()=>api.done(true),250);
+      }else{
+        const a=sel;a.classList.add("bad");it.classList.add("bad");Sound.wrong();api.wrong();
+        setTimeout(()=>{a.classList.remove("bad","sel");it.classList.remove("bad");},420);sel=null;
+      }
+    });
+    return it;
+  }
+  L.forEach(o=>left.append(mk("L",o)));
+  R.forEach(o=>right.append(mk("R",o)));
+};
+
+/* Reihenfolge (anklicken in richtiger Reihenfolge) */
+RENDER.order=(ex,host,api)=>{
+  if(ex.mascot)host.append(mascotRow(ex.mascot,"think"));
+  host.append(el("div",{class:"center big",html:ex.q}));
+  if(ex.hint)host.append(hintBlock(ex.hint));
+  const target=el("div",{class:"dnd-pool"});host.append(el("div",{class:"center muted"},"Tippe in der richtigen Reihenfolge:"));
+  const pool=el("div",{class:"dnd-pool"});host.append(pool);host.append(target);
+  const sorted=ex.items.slice().sort((a,b)=>a.val-b.val);
+  let nextIdx=0;
+  shuffle(ex.items).forEach(it=>{
+    const chip=el("div",{class:"chip"});chip.innerHTML=it.label;
+    chip.addEventListener("click",()=>{
+      if(chip.classList.contains("placed"))return;
+      if(it.val===sorted[nextIdx].val){
+        chip.classList.add("placed");chip.style.borderColor="var(--green)";
+        target.append(chip);Sound.good();nextIdx++;
+        if(nextIdx>=sorted.length)setTimeout(()=>api.done(true),250);
+      }else{chip.classList.add("drag");Sound.wrong();api.wrong();
+        toast("Noch nicht – welches kommt zuerst?");
+        setTimeout(()=>chip.classList.remove("drag"),300);}
+    });
+    pool.append(chip);
+  });
+};
+
+/* Richtig / Falsch */
+RENDER.tf=(ex,host,api)=>{
+  if(ex.mascot)host.append(mascotRow(ex.mascot,"think"));
+  host.append(el("div",{class:"center big",html:ex.q}));
+  if(ex.clock){const c=Clock(ex.clock);const w=el("div",{class:"clock-wrap"});w.append(c.svg);host.append(w);}
+  const grid=el("div",{class:"options cols2"});
+  [["✅ Richtig",true],["❌ Falsch",false]].forEach(([lab,val])=>{
+    const o=el("div",{class:"opt"});o.textContent=lab;
+    o.addEventListener("click",()=>{
+      if(val===ex.answer){o.classList.add("correct");api.done(true);}
+      else{o.classList.add("wrong");api.wrong();api.done(false);}
+    });
+    grid.append(o);
+  });
+  host.append(grid);
+};
+
+/* Zahleneingabe (mit +/- oder Tastatur) */
+RENDER.input=(ex,host,api)=>{
+  if(ex.mascot)host.append(mascotRow(ex.mascot,"think"));
+  host.append(el("div",{class:"center big",html:ex.q}));
+  if(ex.clock){const c=Clock(ex.clock);const w=el("div",{class:"clock-wrap"});w.append(c.svg);host.append(w);}
+  if(ex.hint)host.append(hintBlock(ex.hint));
+  let val=ex.start||0;
+  const row=el("div",{class:"setrow"});
+  const g=el("div",{class:"setgrp"});
+  g.append(el("div",{class:"lab"},ex.label||"Antwort"));
+  const ctr=el("div",{class:"ctr"});
+  const valEl=el("span",{class:"val"},String(val)+(ex.suffix?" "+ex.suffix:""));
+  ctr.append(
+    el("button",{class:"stepbtn",onclick:()=>{Sound.click();val=Math.max(ex.min??0,val-(ex.step||1));valEl.textContent=val+(ex.suffix?" "+ex.suffix:"");}},"−"),
+    valEl,
+    el("button",{class:"stepbtn",onclick:()=>{Sound.click();val=Math.min(ex.max??999,val+(ex.step||1));valEl.textContent=val+(ex.suffix?" "+ex.suffix:"");}},"+")
+  );
+  g.append(ctr);row.append(g);host.append(row);
+  host.append(el("div",{class:"center",style:"margin-top:10px"},
+    el("button",{class:"btn green lg",onclick:()=>{
+      if(val===ex.answer){api.done(true);}else{api.wrong();toast("Noch nicht ganz – probiere weiter!");api.done(false);}
+    }},"✓ Fertig")));
+};
+
+function hintBlock(text){
+  const wrap=el("div",{class:"center",style:"margin:8px 0"});
+  const btn=el("button",{class:"hintbtn"},"💡 Tipp");
+  const box=el("div",{class:"feedback no",style:"justify-content:center;margin-top:8px"});
+  box.innerHTML='<span class="fi">💡</span><div>'+text+'</div>';
+  btn.addEventListener("click",()=>{Sound.click();box.classList.toggle("show");});
+  wrap.append(btn,box);return wrap;
+}
+
+/* ---- Ton-Schalter ------------------------------------------------------- */
+$("#soundBtn").addEventListener("click",function(){
+  const on=!Sound.get();Sound.set(on);this.textContent=on?"🔊":"🔇";if(on)Sound.click();
+});
+
+/* =========================================================================
+   STATIONS-INHALTE
+   ========================================================================= */
+/* ---- Hilfen für Aufgaben ----------------------------------------------- */
+function wOpt(correct, wrong){ return [{label:correct,ok:true}, ...wrong.map(w=>({label:w,ok:false}))]; }
+function clockWrap(opts){const c=Clock(opts);const w=el("div",{class:"clock-wrap"});w.append(c.svg);return {c,w};}
+
+/* ========================= STATION 1: TAGESZEITEN ======================== */
+STATION_DATA.tageszeiten={
+  teach:[
+    { mascot:"Schau, so sieht ein ganzer <b>Tag</b> aus! Am <b>Morgen</b> geht die Sonne auf, in der <b>Nacht</b> schlafen wir. 🌞🌙",
+      title:"Die Tageszeiten",
+      html:`<div style="font-size:1.15rem;line-height:1.9;text-align:left;max-width:420px;margin:0 auto">
+        🌅 <b>Morgen</b> – du wachst auf<br>
+        🏫 <b>Vormittag</b> – du bist in der Schule<br>
+        ☀️ <b>Mittag</b> – du isst zu Mittag<br>
+        🌳 <b>Nachmittag</b> – du spielst<br>
+        🌆 <b>Abend</b> – es wird dunkel<br>
+        🌙 <b>Nacht</b> – du schläfst tief und fest</div>` },
+    { mascot:"Die Sonne wandert über den Himmel – von links (Morgen) nach rechts (Abend).",
+      render(body){
+        body.append(el("h2",{class:"center"},"Der Lauf der Sonne ☀️"));
+        body.append(el("div",{class:"center",style:"font-size:2.4rem;letter-spacing:6px;margin:14px 0"},
+          "🌅 ➜ ☀️ ➜ 🌆 ➜ 🌙"));
+        body.append(el("div",{class:"center big"},"Morgen ➜ Mittag ➜ Abend ➜ Nacht"));
+      } }
+  ],
+  exercises:[
+    { type:"sort", mascot:"Wann machst du das? Ziehe jede Karte zur richtigen Tageszeit!",
+      q:"Sortiere die Tätigkeiten 👇",
+      wrongHint:"Hmm, das passt zu einer anderen Tageszeit – probier es nochmal!",
+      buckets:[
+        {id:"morgen",head:"Morgen",emoji:"🌅"},
+        {id:"vormittag",head:"Vormittag",emoji:"🏫"},
+        {id:"nachmittag",head:"Nachmittag",emoji:"🌳"},
+        {id:"abend",head:"Abend",emoji:"🌆"}],
+      items:[
+        {t:"Aufstehen ⏰",b:"morgen"},
+        {t:"Frühstück 🥐",b:"morgen"},
+        {t:"Unterricht 📚",b:"vormittag"},
+        {t:"Große Pause 🍎",b:"vormittag"},
+        {t:"Draußen spielen ⚽",b:"nachmittag"},
+        {t:"Hausaufgaben ✏️",b:"nachmittag"},
+        {t:"Abendessen 🍽️",b:"abend"},
+        {t:"Schlafen gehen 😴",b:"abend"}] },
+
+    { type:"mc", mascot:"Denk an die Sonne!",
+      q:"Du wachst auf und die Sonne geht gerade auf. ☀️<br>Welche Tageszeit ist das?",
+      options: wOpt("🌅 Morgen",["🌙 Nacht","☀️ Mittag"]),
+      explain:"Wenn die Sonne aufgeht und du aufwachst, ist <b>Morgen</b>." },
+
+    { type:"order",
+      q:"Bringe den Tag in die richtige Reihenfolge!",
+      hint:"Womit beginnt der Tag? Mit dem Morgen!",
+      items:[{label:"🌅 Morgen",val:1},{label:"☀️ Mittag",val:2},{label:"🌆 Abend",val:3},{label:"🌙 Nacht",val:4}],
+      explain:"Der Tag geht: Morgen ➜ Mittag ➜ Abend ➜ Nacht." },
+
+    { type:"mc", q:"Wann schläfst du normalerweise?",
+      options: wOpt("🌙 In der Nacht",["🌅 Am Morgen","☀️ Am Mittag"]),
+      explain:"In der <b>Nacht</b> ist es dunkel und wir schlafen." },
+
+    { type:"tf", q:"Am Abend geht die Sonne unter. 🌆",
+      answer:true, explain:"Richtig! Am Abend wird es dunkel, die Sonne geht unter." },
+
+    { type:"mc", q:"Es ist 12 Uhr mittags. Was machst du wahrscheinlich?",
+      options: wOpt("🍝 Mittagessen",["😴 Schlafen","🥐 Frühstücken"]),
+      explain:"Um 12 Uhr ist <b>Mittag</b> – die beste Zeit zum Mittagessen!" }
+  ]
+};
+
+/* ===================== STATION 2: DIE UHR KENNENLERNEN =================== */
+STATION_DATA.dieuhr={
+  teach:[
+    { mascot:"Eine Uhr hat <b>zwei Zeiger</b>. Merke dir: der <b>kurze, dicke</b> ist der Stundenzeiger, der <b>lange, dünne</b> der Minutenzeiger.",
+      render(body){
+        body.append(el("h2",{class:"center"},"Die Zeiger der Uhr"));
+        const {w}=clockWrap({h:3,m:0});
+        body.append(w);
+        body.append(el("div",{class:"center",style:"line-height:2;font-size:1.1rem"},
+          el("div",{html:"🔵 <b style='color:var(--hour-hand)'>Stundenzeiger</b> – kurz &amp; dick → zeigt die <b>Stunde</b>"}),
+          el("div",{html:"🟠 <b style='color:var(--minute-hand)'>Minutenzeiger</b> – lang &amp; dünn → zeigt die <b>Minuten</b>"}),
+          el("div",{class:"muted",html:"Auf dem Zifferblatt stehen die Zahlen <b>1 bis 12</b>."})
+        ));
+      } },
+    { mascot:"Jetzt darfst <b>du</b> ziehen! Fass einen Zeiger an und bewege ihn. Schau, wie sich die Zeit ändert. 🖐️",
+      render(body){
+        body.append(el("h2",{class:"center"},"Probier es selbst aus! 🖐️"));
+        body.append(el("p",{class:"center muted"},"Ziehe den langen oder kurzen Zeiger mit dem Finger oder der Maus."));
+        const read=el("div",{class:"center huge",style:"margin-top:8px;color:var(--brand-d)"},"…");
+        const {c,w}=clockWrap({h:8,m:0,draggable:true,minStep:5,
+          onChange:(h,m)=>{ read.textContent="🕐 "+uhrText(h12(h),m); }});
+        body.append(w,read);
+      } }
+  ],
+  exercises:[
+    { type:"mc", q:"Welcher Zeiger ist der <b>Stundenzeiger</b>?",
+      clock:{h:3,m:0},
+      options: wOpt("Der kurze, dicke Zeiger 🔵",["Der lange, dünne Zeiger 🟠"]),
+      cols2:true,
+      explain:"Der <b>kurze, dicke</b> Zeiger zeigt die Stunde." },
+
+    { type:"mc", q:"Wie viele Zahlen stehen auf dem Zifferblatt?",
+      clock:{h:12,m:0},
+      options: wOpt("12",["10","24","60"]),
+      explain:"Auf einer Uhr stehen die Zahlen <b>1 bis 12</b>." },
+
+    { type:"tf", q:"Der <b>lange, dünne</b> Zeiger ist der Minutenzeiger.",
+      answer:true, explain:"Genau! Der lange Zeiger zeigt die Minuten." },
+
+    { type:"mc", q:"In welche Richtung laufen die Zeiger einer Uhr?",
+      options: wOpt("Im Uhrzeigersinn ↻",["Rückwärts ↺","Hin und her ↔"]),
+      cols2:true,
+      explain:"Die Zeiger laufen immer <b>im Uhrzeigersinn</b> (nach rechts herum)." },
+
+    { type:"setClock", mascot:"Stelle die Zeiger ein. Tipp: großer Zeiger auf die 12!",
+      prompt:"Stelle die Uhr auf <b>6 Uhr</b>.",
+      hint:"Bei einer vollen Stunde zeigt der Minutenzeiger auf die <b>12</b> und der Stundenzeiger auf die <b>6</b>.",
+      target:{h:6,m:0}, start:{h:12,m:0}, hourStep:1, minStep:1,
+      explain:"6 Uhr: kleiner Zeiger auf 6, großer Zeiger auf 12." }
+  ]
+};
+
+/* ================= STATION 3: VOLLE & HALBE STUNDEN ===================== */
+STATION_DATA.vollehalbe={
+  teach:[
+    { mascot:"Eine <b>volle Stunde</b> erkennst du am großen Zeiger: Er zeigt genau auf die <b>12</b>!",
+      render(body){
+        body.append(el("h2",{class:"center"},"Die volle Stunde 🕒"));
+        const {w}=clockWrap({h:3,m:0});
+        body.append(w);
+        body.append(el("div",{class:"center big"},"Großer Zeiger auf 12, kleiner auf 3 = "));
+        body.append(el("div",{class:"center huge",style:"color:var(--brand-d)"},"3 Uhr"));
+      } },
+    { mascot:"Jetzt kommt etwas Wichtiges: das Wörtchen <b>„halb“</b>! Pass gut auf. 🧐",
+      mood:"think",
+      render(body){
+        body.append(el("h2",{class:"center"},"Die halbe Stunde: „halb“"));
+        const {c,w}=clockWrap({h:3,m:0});
+        body.append(w);
+        const info=el("div",{class:"center big",style:"min-height:3.2em"});
+        body.append(info);
+        let half=false;
+        function upd(){
+          if(half){ c.set(3,30);
+            info.innerHTML="Das ist <b style='color:var(--brand-d)'>halb 4</b> (3 Uhr 30).<br>"+
+              "Großer Zeiger auf der <b>6</b>, kleiner <b>zwischen 3 und 4</b>.";
+          } else { c.set(3,0);
+            info.innerHTML="Das ist <b>3 Uhr</b>.<br>Drücke den Knopf für eine halbe Stunde weiter.";
+          }
+        }
+        upd();
+        body.append(el("div",{class:"center",style:"margin:10px"},
+          el("button",{class:"btn blue",onclick:()=>{half=!half;upd();Sound.click();}},"⏩ Eine halbe Stunde weiter")));
+        const warn=el("div",{class:"feedback no show",style:"justify-content:center"});
+        warn.innerHTML='<span class="fi">⚠️</span><div><b>halb 4</b> heißt <b>3:30</b> – eine halbe Stunde <b>vor</b> 4 Uhr. Nicht 4:30!</div>';
+        body.append(warn);
+      } }
+  ],
+  exercises:[
+    { type:"readClock", q:"Wie spät ist es?", clock:{h:3,m:0},
+      options: wOpt("3 Uhr",["4 Uhr","12 Uhr","halb 3"]),
+      explain:"Großer Zeiger auf 12, kleiner auf 3 → <b>3 Uhr</b>." },
+
+    { type:"setClock", prompt:"Stelle die Uhr auf <b>5 Uhr</b>.",
+      target:{h:5,m:0}, start:{h:12,m:0},
+      hint:"Großer Zeiger auf 12, kleiner auf 5.",
+      explain:"5 Uhr: Minutenzeiger auf 12, Stundenzeiger auf 5." },
+
+    { type:"readClock", mascot:"Denk an „halb“ – der kleine Zeiger ist schon fast bei der nächsten Zahl!",
+      q:"Wie spät ist es?", clock:{h:8,m:30},
+      options: wOpt("halb 9",["halb 8","8 Uhr","9 Uhr"]),
+      explain:"Großer Zeiger auf 6 = halbe Stunde. Es ist <b>halb 9</b> (8:30) – auf dem Weg zur 9." },
+
+    { type:"readClock", mascot:"Achtung, knifflig! 🤔", q:"Wie spät ist es?", clock:{h:12,m:30},
+      options: wOpt("halb 1",["halb 12","12 Uhr","1 Uhr"]),
+      explain:"Nach 12 kommt die 1. Eine halbe Stunde nach 12 ist <b>halb 1</b> (12:30)." },
+
+    { type:"setClock", mascot:"„halb 7“ – welche Zeit ist das?",
+      prompt:"Stelle <b>halb 7</b> ein.",
+      target:{h:6,m:30}, start:{h:12,m:0}, minStep:30,
+      hint:"halb 7 = eine halbe Stunde vor 7 Uhr = <b>6 Uhr 30</b>. Stelle die Stunde auf 6 und die Minute auf 30.",
+      explain:"halb 7 ist 6:30 – kleiner Zeiger zwischen 6 und 7, großer auf der 6." },
+
+    { type:"tf", q:"Bei <b>„halb 5“</b> steht der kleine Zeiger genau auf der 5.",
+      clock:{h:4,m:30}, answer:false,
+      explain:"Nein! Bei halb 5 (4:30) steht der kleine Zeiger <b>zwischen 4 und 5</b>." }
+  ]
+};
+
+/* ===================== STATION 4: VIERTELSTUNDEN ======================== */
+STATION_DATA.viertel={
+  teach:[
+    { mascot:"Eine <b>Viertelstunde</b> sind 15 Minuten. „<b>Viertel nach</b>“ – der große Zeiger ist ein Stück weitergewandert.",
+      render(body){
+        body.append(el("h2",{class:"center"},"Viertel nach 🕝"));
+        const {w}=clockWrap({h:3,m:15});
+        body.append(w);
+        body.append(el("div",{class:"center big"},"Großer Zeiger auf der <b>3</b> = 15 Minuten"));
+        body.append(el("div",{class:"center huge",style:"color:var(--brand-d)"},"Viertel nach 3"));
+        body.append(el("div",{class:"center muted"},"(3:15 · im Buch auch: „viertel 4“)"));
+      } },
+    { mascot:"Bei „<b>Viertel vor</b>“ fehlt nur noch eine Viertelstunde bis zur vollen Stunde.",
+      render(body){
+        body.append(el("h2",{class:"center"},"Viertel vor 🕤"));
+        const {w}=clockWrap({h:9,m:45});
+        body.append(w);
+        body.append(el("div",{class:"center big"},"Großer Zeiger auf der <b>9</b> = 15 Minuten vor voll"));
+        body.append(el("div",{class:"center huge",style:"color:var(--brand-d)"},"Viertel vor 10"));
+        body.append(el("div",{class:"center muted"},"(9:45 · im Buch auch: „drei viertel 10“)"));
+      } }
+  ],
+  exercises:[
+    { type:"readClock", q:"Wie spät ist es?", clock:{h:6,m:15},
+      options: wOpt("Viertel nach 6",["Viertel vor 6","halb 6","Viertel nach 7"]),
+      explain:"Großer Zeiger auf der 3 → <b>Viertel nach 6</b> (6:15)." },
+
+    { type:"readClock", q:"Wie spät ist es?", clock:{h:9,m:45},
+      options: wOpt("Viertel vor 10",["Viertel nach 9","Viertel vor 9","halb 10"]),
+      explain:"Großer Zeiger auf der 9 → <b>Viertel vor 10</b> (9:45)." },
+
+    { type:"match", mascot:"Verbinde jede Uhr mit der richtigen Zeit!",
+      q:"Welche Uhrzeit gehört zur Uhr?",
+      pairs:[
+        [{clock:{h:2,m:15}},"Viertel&nbsp;nach&nbsp;2"],
+        [{clock:{h:5,m:45}},"Viertel&nbsp;vor&nbsp;6"],
+        [{clock:{h:8,m:0}}, "8&nbsp;Uhr"],
+        [{clock:{h:10,m:30}},"halb&nbsp;11"]],
+      explain:"Schau auf den großen Zeiger: 12=voll, 3=Viertel nach, 6=halb, 9=Viertel vor." },
+
+    { type:"setClock", prompt:"Stelle <b>Viertel nach 5</b> ein.",
+      target:{h:5,m:15}, start:{h:12,m:0}, minStep:15,
+      hint:"Viertel nach 5 = 5 Uhr 15. Großer Zeiger auf die 3.",
+      explain:"Viertel nach 5 ist 5:15." },
+
+    { type:"setClock", prompt:"Stelle <b>Viertel vor 8</b> ein.",
+      target:{h:7,m:45}, start:{h:12,m:0}, minStep:15,
+      hint:"Viertel vor 8 = <b>7 Uhr 45</b>. Stunde auf 7, großer Zeiger auf die 9.",
+      explain:"Viertel vor 8 ist 7:45 – kleiner Zeiger zwischen 7 und 8." },
+
+    { type:"mc", mascot:"Im Buch steht manchmal eine Kurzform.",
+      q:"Im Buch steht: <b>„viertel 12“</b>.<br>Welche Uhr zeigt das?",
+      options:[
+        {clock:{h:11,m:15},ok:true},
+        {clock:{h:12,m:15},ok:false},
+        {clock:{h:11,m:45},ok:false},
+        {clock:{h:12,m:0},ok:false}],
+      explain:"„viertel 12“ ist die Kurzform für <b>Viertel nach 11</b> = 11:15." }
+  ]
+};
+
+/* ===================== STATION 5: MINUTEN GENAU ========================= */
+STATION_DATA.minuten={
+  teach:[
+    { mascot:"Von einer Zahl zur nächsten sind es immer <b>5 Minuten</b>. Zähle: 5, 10, 15, 20 …",
+      render(body){
+        body.append(el("h2",{class:"center"},"Zählen in 5er-Schritten"));
+        const {w}=clockWrap({h:4,m:5});
+        body.append(w);
+        body.append(el("div",{class:"center big"},"Großer Zeiger auf der <b>1</b> = 5 Minuten"));
+        body.append(el("div",{class:"center huge",style:"color:var(--brand-d)"},"5 nach 4"));
+      } },
+    { mascot:"In der <b>ersten</b> Hälfte sagen wir „<b>nach</b>“, in der <b>zweiten</b> Hälfte „<b>vor</b>“.",
+      render(body){
+        body.append(el("h2",{class:"center"},"„nach“ und „vor“"));
+        const {w}=clockWrap({h:4,m:50});
+        body.append(w);
+        body.append(el("div",{class:"center big"},"Großer Zeiger auf der <b>10</b> = 10 Minuten vor voll"));
+        body.append(el("div",{class:"center huge",style:"color:var(--brand-d)"},"10 vor 5"));
+      } }
+  ],
+  exercises:[
+    { type:"readClock", q:"Wie spät ist es?", clock:{h:7,m:5},
+      options: wOpt("5 nach 7",["5 vor 7","10 nach 7","7 Uhr"]),
+      explain:"Großer Zeiger auf der 1 → 5 Minuten → <b>5 nach 7</b>." },
+
+    { type:"readClock", q:"Wie spät ist es?", clock:{h:12,m:10},
+      options: wOpt("10 nach 12",["10 vor 12","2 nach 12","halb 12"]),
+      explain:"Großer Zeiger auf der 2 → 10 Minuten → <b>10 nach 12</b>." },
+
+    { type:"readClock", mascot:"Jetzt die zweite Hälfte – da heißt es „vor“.",
+      q:"Wie spät ist es?", clock:{h:8,m:40},
+      options: wOpt("20 vor 9",["20 nach 8","40 nach 8","20 vor 8"]),
+      explain:"Bis 9 Uhr fehlen 20 Minuten → <b>20 vor 9</b> (8:40)." },
+
+    { type:"readClock", q:"Wie spät ist es?", clock:{h:11,m:55},
+      options: wOpt("5 vor 12",["5 nach 11","55 nach 11","5 vor 11"]),
+      explain:"Bis 12 Uhr fehlen 5 Minuten → <b>5 vor 12</b> (11:55)." },
+
+    { type:"setClock", prompt:"Stelle <b>10 nach 3</b> ein.",
+      target:{h:3,m:10}, start:{h:12,m:0}, minStep:5,
+      hint:"10 nach 3 = 3 Uhr 10. Großer Zeiger auf die 2.",
+      explain:"10 nach 3 ist 3:10." },
+
+    { type:"setClock", prompt:"Stelle <b>20 vor 6</b> ein.",
+      target:{h:5,m:40}, start:{h:12,m:0}, minStep:5,
+      hint:"20 vor 6 = <b>5 Uhr 40</b>. Stunde auf 5, großer Zeiger auf die 8.",
+      explain:"20 vor 6 ist 5:40." }
+  ]
+};
+
+/* ================ STATION 6: DIGITAL & 24 STUNDEN ======================= */
+function smallClock(h,m,show24){const {c,w}=clockWrap({h,m,show24});c.svg.style.width="150px";c.svg.style.height="150px";return w;}
+function labeled(node,label){const d=el("div",{class:"center"});d.append(node);d.append(el("div",{class:"big"},label));return d;}
+
+STATION_DATA.digital={
+  teach:[
+    { mascot:"Eine <b>Digitaluhr</b> zeigt die Zeit mit Zahlen: zuerst die <b>Stunden</b>, dann die <b>Minuten</b>.",
+      render(body){
+        body.append(el("h2",{class:"center"},"Die Digitaluhr 📟"));
+        const row=el("div",{style:"display:flex;gap:20px;justify-content:center;align-items:center;flex-wrap:wrap"});
+        row.append(smallClock(8,30));
+        row.append(el("div",{style:"font-size:1.8rem"},"="));
+        row.append(el("span",{class:"digital"},"08:30"));
+        body.append(row);
+        body.append(el("div",{class:"center big"},"Beides bedeutet: <b>halb 9</b> (8 Uhr 30)"));
+      } },
+    { mascot:"Ein Tag hat 24 Stunden. Nach 12 Uhr mittags zählen wir weiter: 13, 14, 15 … bis 24!",
+      render(body){
+        body.append(el("h2",{class:"center"},"Die 24-Stunden-Zeit 🌍"));
+        const row=el("div",{style:"display:flex;gap:14px;justify-content:center;align-items:center;flex-wrap:wrap"});
+        row.append(labeled(el("span",{class:"digital"},"01:15"),"1 Uhr (nachts)"));
+        row.append(el("div",{style:"font-size:1.6rem"},"≠"));
+        row.append(labeled(el("span",{class:"digital red"},"13:15"),"1 Uhr (nachmittags)"));
+        body.append(row);
+        body.append(el("div",{class:"center big",style:"margin-top:8px"},"Nachmittags: <b>Stunde + 12</b><br>1 Uhr → 13 Uhr, 5 Uhr → 17 Uhr, 8 Uhr → 20 Uhr"));
+      } }
+  ],
+  exercises:[
+    { type:"match", mascot:"Welche Digitaluhr passt zur Zeigeruhr?",
+      q:"Verbinde Zeigeruhr und Digitaluhr!",
+      pairs:[
+        [{clock:{h:6,m:30}}, '<span class="digital" style="font-size:1.3rem">06:30</span>'],
+        [{clock:{h:9,m:15}}, '<span class="digital" style="font-size:1.3rem">09:15</span>'],
+        [{clock:{h:3,m:45}}, '<span class="digital" style="font-size:1.3rem">03:45</span>'],
+        [{clock:{h:12,m:0}}, '<span class="digital" style="font-size:1.3rem">12:00</span>']],
+      explain:"Lies erst die Stunde (kleiner Zeiger), dann die Minuten (großer Zeiger)." },
+
+    { type:"mc", q:"Es ist nachmittags <b>3 Uhr</b>.<br>Wie heißt das in der 24-Stunden-Zeit?",
+      options: wOpt("15 Uhr",["13 Uhr","14 Uhr","30 Uhr"]),
+      explain:"Nachmittags rechnest du + 12: 3 + 12 = <b>15 Uhr</b>." },
+
+    { type:"mc", q:"<b>13 Uhr</b> ist dasselbe wie …",
+      options: wOpt("1 Uhr nachmittags",["3 Uhr nachmittags","11 Uhr vormittags","10 Uhr"]),
+      explain:"13 − 12 = 1. Also <b>1 Uhr nachmittags</b>." },
+
+    { type:"mc", mascot:"Schau auf die Digitalanzeige.",
+      q:"Welche Zeigeruhr zeigt diese Zeit?",
+      digital:{text:"19:15",red:true},
+      options:[
+        {clock:{h:7,m:15},ok:true},
+        {clock:{h:9,m:15},ok:false},
+        {clock:{h:7,m:45},ok:false},
+        {clock:{h:5,m:15},ok:false}],
+      explain:"19 Uhr = 7 Uhr abends. 19:15 ist also <b>Viertel nach 7</b>." },
+
+    { type:"input", q:"<b>20 Uhr</b> sind … Uhr abends.",
+      label:"Uhr", suffix:"Uhr", answer:8, start:0, min:0, max:24,
+      hint:"Rechne 20 − 12.",
+      explain:"20 − 12 = <b>8 Uhr</b> abends." },
+
+    { type:"setClock", mascot:"Stelle die 24-Stunden-Zeit ein. Innen siehst du die Zahlen 13–24.",
+      prompt:"Stelle <b>17:30 Uhr</b> ein (24-Stunden).",
+      target:{h:17,m:30}, start:{h:12,m:0}, match24:true, show24:true, minStep:30, hourStep:1,
+      hint:"17 Uhr = 5 Uhr nachmittags. Stelle die Stunde auf 17, die Minute auf 30.",
+      explain:"17:30 = halb 6 nachmittags." }
+  ]
+};
+
+/* ===================== STATION 7: ZEITSPANNEN ========================== */
+STATION_DATA.zeitspannen={
+  teach:[
+    { mascot:"Eine <b>Zeitspanne</b> ist die Zeit von einem Zeitpunkt bis zum anderen – also: wie lange etwas dauert.",
+      render(body){
+        body.append(el("h2",{class:"center"},"Vom Start bis zum Ende ⏳"));
+        const row=el("div",{style:"display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap"});
+        row.append(labeled(smallClock(10,0),"Start: 10 Uhr"));
+        row.append(el("div",{style:"font-size:1.4rem;color:var(--green-d);font-weight:900"},"➜ + 5 Stunden ➜"));
+        row.append(labeled(smallClock(15,0),"Ende: 15 Uhr"));
+        body.append(row);
+        body.append(el("div",{class:"center huge",style:"color:var(--brand-d)"},"10 Uhr + 5 Std = 15 Uhr"));
+      } },
+    { mascot:"Du kannst auch ausrechnen, <b>wie lange</b> etwas dauert: zähle vom Anfang bis zum Ende.",
+      render(body){
+        body.append(el("h2",{class:"center"},"Wie lange dauert es?"));
+        const row=el("div",{style:"display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap"});
+        row.append(labeled(smallClock(16,0),"Flöten ab 16:00"));
+        row.append(el("div",{style:"font-size:1.4rem;color:var(--green-d);font-weight:900"},"➜ ? ➜"));
+        row.append(labeled(smallClock(16,45),"bis 16:45"));
+        body.append(row);
+        body.append(el("div",{class:"center huge",style:"color:var(--brand-d)"},"= 45 Minuten"));
+      } }
+  ],
+  exercises:[
+    { type:"mc", q:"Es ist <b>10 Uhr</b>. In <b>5 Stunden</b> ist es …?",
+      options: wOpt("15 Uhr",["14 Uhr","16 Uhr","5 Uhr"]),
+      explain:"10 + 5 = <b>15 Uhr</b>." },
+
+    { type:"mc", mascot:"Zähle von 15:30 bis 16:30.",
+      q:"Schwimmen von <b>15:30</b> bis <b>16:30</b>.<br>Wie lange dauert es?",
+      options: wOpt("1 Stunde",["30 Minuten","2 Stunden","1 Stunde 30 min"]),
+      explain:"Von 15:30 bis 16:30 ist genau <b>1 Stunde</b>." },
+
+    { type:"mc", q:"Flöten von <b>16:00</b> bis <b>16:45</b>.<br>Wie lange dauert es?",
+      options: wOpt("45 Minuten",["15 Minuten","1 Stunde","30 Minuten"]),
+      explain:"Von :00 bis :45 sind <b>45 Minuten</b>." },
+
+    { type:"input", q:"Der Film beginnt um <b>14 Uhr</b> und dauert <b>2 Stunden</b>.<br>Wann endet er?",
+      label:"Uhr", suffix:"Uhr", answer:16, start:14, min:0, max:24,
+      hint:"14 + 2 = ?",
+      explain:"14 + 2 = <b>16 Uhr</b>." },
+
+    { type:"mc", q:"Es ist jetzt <b>8 Uhr</b>. Wie spät ist es in <b>5 Stunden</b>?",
+      options: wOpt("13 Uhr",["12 Uhr","1 Uhr","18 Uhr"]),
+      explain:"8 + 5 = <b>13 Uhr</b> (1 Uhr nachmittags)." },
+
+    { type:"input", mascot:"Eine echte Aufgabe wie im Buch! 🚂",
+      q:"Laura fährt mit dem Zug. Abfahrt ist um <b>9 Uhr</b>.<br>Die Fahrt dauert <b>2 Stunden</b>. Wann kommt sie an?",
+      label:"Uhr", suffix:"Uhr", answer:11, start:9, min:0, max:24,
+      hint:"9 Uhr + 2 Stunden.",
+      explain:"9 + 2 = <b>11 Uhr</b>." }
+  ]
+};
+
+/* ============ STATION 8: STUNDEN · MINUTEN · SEKUNDEN =================== */
+STATION_DATA.einheiten={
+  teach:[
+    { mascot:"Das musst du dir gut merken! Diese drei Sätze brauchst du immer wieder. 🧠",
+      render(body){
+        body.append(el("h2",{class:"center"},"Die wichtigsten Zeit-Einheiten"));
+        const box=(a,b)=>el("div",{class:"feedback ok show",style:"justify-content:center;font-size:1.3rem"},
+          el("span",{class:"fi"},"⏰"),el("div",{html:a+" = <b>"+b+"</b>"}));
+        body.append(box("1 Tag","24 Stunden (h)"));
+        body.append(box("1 Stunde","60 Minuten (min)"));
+        body.append(box("1 Minute","60 Sekunden (s)"));
+      } },
+    { mascot:"Eine Minute kann man teilen – genau wie eine Pizza! 🍕",
+      render(body){
+        body.append(el("h2",{class:"center"},"Bruchteile einer Minute"));
+        const t=(a,b)=>el("div",{class:"center big"},a+" Minute = <b style='color:var(--brand-d)'>"+b+" Sekunden</b>");
+        body.append(t("eine viertel","15"));
+        body.append(t("eine halbe","30"));
+        body.append(t("eine dreiviertel","45"));
+        body.append(t("eine ganze","60"));
+      } }
+  ],
+  exercises:[
+    { type:"mc", q:"1 Stunde hat … Minuten.",
+      options: wOpt("60",["30","100","24"]),
+      explain:"1 Stunde = <b>60 Minuten</b>." },
+
+    { type:"mc", q:"1 Tag hat … Stunden.",
+      options: wOpt("24",["12","60","100"]),
+      explain:"1 Tag = <b>24 Stunden</b>." },
+
+    { type:"mc", q:"1 Minute hat … Sekunden.",
+      options: wOpt("60",["100","30","24"]),
+      explain:"1 Minute = <b>60 Sekunden</b>." },
+
+    { type:"mc", mascot:"Welche Einheit passt? Stunde (h), Minute (min) oder Sekunde (s)?",
+      q:"Eine Schulstunde dauert 45 …",
+      options: wOpt("Minuten",["Sekunden","Stunden"]),
+      explain:"Eine Schulstunde dauert 45 <b>Minuten</b>." },
+
+    { type:"mc", q:"Arne läuft die 50-Meter-Strecke in 9 …",
+      options: wOpt("Sekunden",["Minuten","Stunden"]),
+      explain:"50 Meter schafft man in wenigen <b>Sekunden</b>." },
+
+    { type:"input", mascot:"Wie viele Sekunden fehlen noch bis zur vollen Minute?",
+      q:"Es sind <b>45 Sekunden</b> vergangen.<br>Wie viele Sekunden fehlen bis zur vollen Minute?",
+      label:"Sekunden", suffix:"s", answer:15, start:0, min:0, max:60, step:5,
+      hint:"Eine volle Minute hat 60 Sekunden. Rechne 60 − 45.",
+      explain:"60 − 45 = <b>15 Sekunden</b>." },
+
+    { type:"mc", q:"Eine <b>halbe</b> Minute sind … Sekunden.",
+      options: wOpt("30",["15","60","45"]),
+      explain:"Eine halbe Minute = die Hälfte von 60 = <b>30 Sekunden</b>." }
+  ]
+};
+
+/* ================== STATION 9: MEISTER-CHALLENGE ======================= */
+STATION_DATA.meister={
+  teach:[
+    { mascot:"Du hast alles gelernt! Jetzt kommt die große <b>Meister-Prüfung</b>. Schaffst du alle Aufgaben? Ich glaube an dich! 🏆",
+      mood:"cheer",
+      render(body){
+        body.append(el("h2",{class:"center"},"🏆 Die Meister-Challenge 🏆"));
+        body.append(el("div",{class:"center big"},"Hier kommt alles zusammen: lesen, einstellen, digital, 24-Stunden und rechnen mit Zeit."));
+        body.append(el("div",{class:"center",style:"font-size:3rem;letter-spacing:6px;margin-top:8px"},"🕐 🕝 🕖 🕘 🕚"));
+      } }
+  ],
+  exercises:[
+    { type:"readClock", q:"① Wie spät ist es?", clock:{h:5,m:30},
+      options: wOpt("halb 6",["halb 5","5 Uhr","6 Uhr"]),
+      explain:"Großer Zeiger auf 6, kleiner zwischen 5 und 6 → <b>halb 6</b>." },
+
+    { type:"setClock", prompt:"② Stelle <b>Viertel vor 3</b> ein.",
+      target:{h:2,m:45}, start:{h:12,m:0}, minStep:15,
+      hint:"Viertel vor 3 = 2 Uhr 45.",
+      explain:"Viertel vor 3 ist 2:45." },
+
+    { type:"readClock", q:"③ Wie spät ist es?", clock:{h:10,m:50},
+      options: wOpt("10 vor 11",["10 nach 10","50 nach 10","10 vor 10"]),
+      explain:"Bis 11 fehlen 10 Minuten → <b>10 vor 11</b>." },
+
+    { type:"mc", q:"④ Es ist <b>18 Uhr</b>. Das ist …",
+      options: wOpt("6 Uhr abends",["8 Uhr abends","6 Uhr morgens","16 Uhr"]),
+      explain:"18 − 12 = 6 → <b>6 Uhr abends</b>." },
+
+    { type:"input", mascot:"Eine Zeitspanne – wie im Zoo! 🦁",
+      q:"⑤ Der Zoo öffnet um <b>9 Uhr</b> und schließt um <b>17 Uhr</b>.<br>Wie viele Stunden ist er geöffnet?",
+      label:"Stunden", suffix:"Std", answer:8, start:0, min:0, max:24,
+      hint:"Rechne 17 − 9.",
+      explain:"17 − 9 = <b>8 Stunden</b>." },
+
+    { type:"match", q:"⑥ Verbinde die Uhren mit der richtigen Zeit!",
+      pairs:[
+        [{clock:{h:7,m:15}},"Viertel nach 7"],
+        [{clock:{h:9,m:30}},"halb 10"],
+        [{clock:{h:4,m:45}},"Viertel vor 5"],
+        [{clock:{h:6,m:0}},"6 Uhr"]],
+      explain:"12=voll · 3=Viertel nach · 6=halb · 9=Viertel vor." },
+
+    { type:"mc", mascot:"Fütterungszeit im Zoo!",
+      q:"⑦ Die Affen werden um <b>14:30 Uhr</b> gefüttert.<br>Welche Zeigeruhr stimmt?",
+      options:[
+        {clock:{h:14,m:30},ok:true},
+        {clock:{h:4,m:30},ok:false},
+        {clock:{h:2,m:0},ok:false},
+        {clock:{h:6,m:30},ok:false}],
+      explain:"14:30 = halb 3 nachmittags → großer Zeiger auf 6, kleiner zwischen 2 und 3." },
+
+    { type:"mc", mascot:"Letzte Aufgabe – kombiniere Zeitspanne und Uhrzeit!",
+      q:"⑧ Dein Schulweg dauert <b>15 Minuten</b>. Du musst um <b>8:00 Uhr</b> in der Schule sein.<br>Wann musst du losgehen?",
+      options: wOpt("Viertel vor 8 (7:45)",["8 Uhr (8:00)","Viertel nach 8 (8:15)","halb 8 (7:30)"]),
+      explain:"15 Minuten vor 8 Uhr = <b>Viertel vor 8</b> (7:45)." }
+  ]
+};
+
+
+/* ---- Nach dem Laden zum richtigen Bildschirm ---------------------------- */
+function routeStart(){
+  updTotal();
+  const r=Store.getProgress();
+  if(r && STATION_DATA[r.id]) startStation(r.id,r);   // offenen Fortschritt fortsetzen
+  else renderHub();
+}
+
+/* ---- Start: gemeinsamen Spielstand laden/synchronisieren, dann anzeigen -- */
+SchoolCloud.bootSync(routeStart);
+
+// dekorative Wolken
+(function clouds(){const b=document.body;for(let i=0;i<4;i++){const c=el("div",{class:"cloud"});
+  c.style.top=(8+i*16)+"%";c.style.width=(60+rnd(0,60))+"px";c.style.height=(20+rnd(0,14))+"px";
+  c.style.animationDuration=(40+rnd(0,40))+"s";c.style.animationDelay=(-rnd(0,40))+"s";b.append(c);}})();
+</script>
+</body>
+</html>
