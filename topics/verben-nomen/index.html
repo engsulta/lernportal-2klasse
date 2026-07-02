@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Wörter-Detektiv 🔎 – Nomen & Verben</title>
+<link rel="stylesheet" href="../../shared/styles.css">
+<style>
+/* thema-spezifische Kleinigkeiten (Rest kommt aus shared/styles.css) */
+.emoji-mascot{display:flex;align-items:center;justify-content:center;font-size:60px;
+  background:#eef4ff;border-radius:50%;box-shadow:var(--shadow-s)}
+.bigword{display:inline-block;margin-top:10px;font-size:2.2rem;font-weight:900;color:var(--ink);
+  background:var(--paper-2);padding:6px 22px;border-radius:16px;box-shadow:var(--shadow-s)}
+.sortwrap{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}
+.bucket{background:var(--paper-2);border:3px dashed var(--sky-1);border-radius:var(--radius-s);
+  padding:10px;min-height:120px;text-align:center}
+.bucket h3{margin:.1em 0 .3em;font-size:1.1rem}
+.bucket.hot{border-color:var(--brand);background:#fff3ee}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:10px}
+.chip{background:#fff;border:2px solid var(--sky-1);border-radius:999px;padding:8px 16px;
+  font-weight:800;font-size:1.05rem;cursor:pointer;box-shadow:var(--shadow-s);transition:transform .1s}
+.chip:active{transform:scale(.94)}
+.chip.sel{border-color:var(--brand);background:#fff3ee;transform:translateY(-2px)}
+.chip.placed{opacity:.55;pointer-events:none}
+.chip.ok{background:#e6faf0;border-color:var(--green)}
+</style>
+</head>
+<body>
+<canvas id="confetti"></canvas>
+
+<div id="app">
+  <div class="topbar">
+    <div class="brand"><span class="logo">🔎</span><span>Wörter-Detektiv</span></div>
+    <div class="score"><span class="star">★</span><span id="totalStars">0</span></div>
+    <button class="iconbtn" id="soundBtn" title="Ton an/aus">🔊</button>
+  </div>
+  <div id="screen"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="../../shared/config.js"></script>
+<script src="../../shared/cloud.js"></script>
+<script>
+"use strict";
+
+/* ---- kleine Helfer ------------------------------------------------------ */
+const $  = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
+function el(tag, attrs={}, ...kids){
+  const n=document.createElement(tag);
+  for(const k in attrs){
+    if(k==="class") n.className=attrs[k];
+    else if(k==="html") n.innerHTML=attrs[k];
+    else if(k.startsWith("on")&&typeof attrs[k]==="function") n.addEventListener(k.slice(2),attrs[k]);
+    else if(attrs[k]!=null) n.setAttribute(k,attrs[k]);
+  }
+  for(const c of kids){ if(c==null) continue; n.append(c.nodeType?c:document.createTextNode(c)); }
+  return n;
+}
+const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=rnd(0,i);[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+/* ---- Ton (WebAudio, ohne Dateien) -------------------------------------- */
+const Sound=(()=>{
+  let ctx=null, on=true;
+  function ac(){ if(!ctx) ctx=new (window.AudioContext||window.webkitAudioContext)();
+    if(ctx.state==="suspended"){ ctx.resume(); } return ctx; }
+  ["pointerdown","touchstart","keydown","click"].forEach(ev=>
+    window.addEventListener(ev,()=>{ try{ ac(); }catch(e){} },{passive:true}));
+  function tone(f,t,dur,type="sine",vol=.18){
+    if(!on) return; const c=ac(); const o=c.createOscillator(),g=c.createGain();
+    o.type=type;o.frequency.setValueAtTime(f,t);o.connect(g);g.connect(c.destination);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.01);
+    g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.start(t);o.stop(t+dur);
+  }
+  return {
+    set(v){on=v;}, get(){return on;},
+    click(){if(!on)return;const t=ac().currentTime;tone(440,t,.07,"triangle",.12);},
+    good(){if(!on)return;const t=ac().currentTime;[523,659,784].forEach((f,i)=>tone(f,t+i*.09,.18,"sine",.16));},
+    wrong(){if(!on)return;const t=ac().currentTime;tone(280,t,.18,"sawtooth",.1);tone(200,t+.12,.22,"sawtooth",.1);},
+    win(){if(!on)return;const t=ac().currentTime;[523,587,659,784,880,1046].forEach((f,i)=>tone(f,t+i*.12,.3,"triangle",.16));}
+  };
+})();
+
+/* ---- Konfetti ----------------------------------------------------------- */
+const Confetti=(()=>{
+  const cv=$("#confetti"),cx=cv.getContext("2d");let parts=[],raf=null;
+  function size(){cv.width=innerWidth;cv.height=innerHeight;}
+  addEventListener("resize",size);
+  const COL=["#ff7a59","#ffd23f","#36c98d","#3aa0ff","#9b6bff","#ff79c6"];
+  function burst(n=160){
+    size();cv.style.display="block";
+    for(let i=0;i<n;i++)parts.push({x:innerWidth/2+rnd(-60,60),y:innerHeight/3,
+      vx:rnd(-90,90)/10,vy:rnd(-150,-40)/10,g:.18+Math.random()*.12,
+      s:rnd(6,13),c:pick(COL),r:Math.random()*6,vr:(Math.random()-.5)*.5,life:rnd(80,140)});
+    if(!raf)loop();
+  }
+  function loop(){
+    cx.clearRect(0,0,cv.width,cv.height);
+    parts.forEach(p=>{p.vy+=p.g;p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;p.life--;
+      cx.save();cx.translate(p.x,p.y);cx.rotate(p.r);cx.fillStyle=p.c;
+      cx.fillRect(-p.s/2,-p.s/2,p.s,p.s*.6);cx.restore();});
+    parts=parts.filter(p=>p.life>0&&p.y<cv.height+30);
+    if(parts.length)raf=requestAnimationFrame(loop);
+    else{raf=null;cv.style.display="none";}
+  }
+  return {burst};
+})();
+
+const toast=SchoolCloud.toast;
+
+/* ---- Speicher: gemeinsamer Cloud-/Fortschritt-Store (siehe shared/cloud.js) --- */
+const Store = SchoolCloud.store("verben-nomen");
+const Cloud = { ready: SchoolCloud.ready };
+function renderCodeScreen(firstRun){ SchoolCloud.showCodeScreen(firstRun, routeStart); }
+
+/* ---- Maskottchen: "Professor Fritz die Eule" --------------------------- */
+function mascotRow(text,mood="happy"){
+  const row=el("div",{class:"mascot-row"});
+  const face = mood==="cheer"?"🦉🎉":mood==="think"?"🦉❔":"🦉";
+  row.append(el("div",{class:"mascot emoji-mascot"},face));
+  row.append(el("div",{class:"bubble",html:text}));
+  return row;
+}
+
+/* ---- Bildschirm-Helfer ------------------------------------------------- */
+function setScreen(node){const s=$("#screen");s.innerHTML="";s.append(node);window.scrollTo(0,0);}
+function updTotal(){const e=$("#totalStars");if(e)e.textContent=Store.total();}
+
+/* =========================================================================
+   STATIONEN
+   ========================================================================= */
+const STATIONS=[
+  {id:"nomen",         n:"Namenwörter (Nomen)", e:"🧍", c:"--blue"},
+  {id:"verben",        n:"Tuwörter (Verben)",   e:"🏃", c:"--green"},
+  {id:"unterscheiden", n:"Nomen oder Verb?",    e:"🔎", c:"--purple"},
+  {id:"meister",       n:"Meister-Challenge",   e:"🏆", c:"--gold", master:true}
+];
+
+/* ---- Stationskarte ----------------------------------------------------- */
+function renderHub(){
+  updTotal();
+  const wrap=el("div",{class:"screen"});
+  wrap.append(el("h1",{class:"hub-title"},"🔎 Wörter-Detektiv"));
+  wrap.append(el("div",{class:"hub-sub"},"Erkenne Nomen und Verben – wähle eine Station!"));
+  wrap.append(mascotRow("Hallo! Ich bin <b>Professor Fritz</b> 🦉. Wir finden heraus: Welches Wort ist ein <b>Nomen</b> und welches ein <b>Verb</b>?"));
+
+  const prog=Store.getProgress();
+  if(prog && STATION_DATA[prog.id]){
+    const ps=STATIONS.find(x=>x.id===prog.id);
+    const cont=el("div",{class:"center",style:"margin:2px 0 12px"});
+    cont.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();startStation(prog.id,prog);}},
+      "▶ Weitermachen: "+(ps?ps.n:"")+" – Aufgabe "+((prog.i||0)+1)));
+    wrap.append(cont);
+  }
+
+  const grid=el("div",{class:"stations"});
+  let prevDone=true;
+  STATIONS.forEach((s,i)=>{
+    const stars=Store.stars(s.id), done=Store.data.done[s.id];
+    const locked = !prevDone && !done;
+    const card=el("div",{class:"station"+(s.master?" master":"")+(done?" done":"")+(locked?" locked":"")});
+    card.style.borderColor = done? "var(--gold)":"transparent";
+    card.append(el("span",{class:"num"},String(i+1)));
+    card.append(el("span",{class:"emoji"},s.e));
+    card.append(el("div",{class:"nm"},s.n));
+    const sd=el("div",{class:"stars"});
+    for(let k=0;k<3;k++)sd.append(el("span",{class:"s"+(k<stars?" on":"")},"★"));
+    card.append(sd);
+    if(!locked) card.addEventListener("click",()=>{Sound.click();startStation(s.id);});
+    grid.append(card);
+    prevDone = done;
+  });
+  wrap.append(grid);
+
+  const foot=el("div",{class:"center",style:"margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  foot.append(el("button",{class:"btn gray",onclick:()=>{location.href="../../index.html";}},"← Themen"));
+  foot.append(el("button",{class:"btn gray",onclick:()=>{
+      if(confirm("Fortschritt in diesem Thema zurücksetzen?")){Store.reset();renderHub();}
+    }},"↺ Neu starten"));
+  if(Cloud.ready()){
+    foot.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();renderCodeScreen(false);}},
+      "☁️ Code: "+(SchoolCloud.code()||"—")));
+  }
+  wrap.append(foot);
+  setScreen(wrap);
+}
+
+/* ---- Kopfzeile einer Station ------------------------------------------- */
+function stationHeader(id,step){
+  const s=STATIONS.find(x=>x.id===id);
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",
+    onclick:()=>{Sound.click();renderHub();}},"← Karte"));
+  bar.append(el("div",{class:"brand"},el("span",{},s.e+" "+s.n)));
+  bar.append(el("div",{class:"steplabel"},step||""));
+  return bar;
+}
+
+/* ---- Station-Ablauf: Lernkarten -> Übungen ----------------------------- */
+function startStation(id,resume){
+  const data=STATION_DATA[id];
+  if(!data){toast("Diese Station wird noch gebaut …");return;}
+  const teach=data.teach||[];
+  const exercises=data.exercises||[];
+  let ti=0;
+  if(resume){ runExercises(id,exercises,resume); return; }
+  if(teach.length) showTeach(); else runExercises(id,exercises);
+
+  function showTeach(){
+    const card=teach[ti];
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id,"Erklärung "+(ti+1)+"/"+teach.length));
+    const body=el("div",{class:"card"});
+    if(card.render){ card.render(body); }
+    else {
+      if(card.title) body.append(el("h2",{class:"center"},card.title));
+      if(card.html)  body.append(el("div",{class:"center",html:card.html}));
+    }
+    scr.append(card.mascot? mascotRow(card.mascot,card.mood||"think"):document.createTextNode(""));
+    scr.append(body);
+    const nav=el("div",{class:"center",style:"margin-top:8px"});
+    nav.append(el("button",{class:"btn lg green",onclick:()=>{
+      Sound.click(); ti++;
+      if(ti<teach.length) showTeach(); else runExercises(id,exercises);
+    }}, ti<teach.length-1?"Weiter →":"Los, üben! ✏️"));
+    scr.append(nav);
+    setScreen(scr);
+  }
+}
+
+/* ---- Übungs-Engine ------------------------------------------------------ */
+function runExercises(id,list,resume){
+  let i=resume && resume.i<list.length ? resume.i : 0,
+      wrongTotal=resume ? resume.wrongTotal||0 : 0;
+  next();
+
+  function next(){
+    if(i>=list.length){ return finish(); }
+    Store.saveProgress({id, i, wrongTotal});
+    const ex=list[i];
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id));
+    const pr=el("div",{class:"card"});
+    const bar=el("div",{class:"progress"});const fill=el("i");bar.append(fill);
+    pr.append(bar);
+    fill.style.width=(i/list.length*100)+"%";
+    pr.append(el("div",{class:"steplabel"},"Aufgabe "+(i+1)+" von "+list.length));
+    scr.append(pr);
+
+    const host=el("div",{class:"card"});
+    scr.append(host);
+    const fb=el("div",{class:"feedback"});scr.append(fb);
+    setScreen(scr);
+
+    const api={
+      done:(ok)=>{ if(ok){ fill.style.width=((i+1)/list.length*100)+"%"; }
+        afterAnswer(ok,ex,fb,()=>{ i++; next(); }); },
+      wrong:()=>{ wrongTotal++; }
+    };
+    renderExercise(ex,host,api);
+  }
+
+  function afterAnswer(ok,ex,fb,cont){
+    fb.className="feedback show "+(ok?"ok":"no");
+    fb.innerHTML="";
+    fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+    const msg=el("div");
+    msg.innerHTML = ok ? pick(["Super gemacht!","Richtig! ⭐","Klasse!","Genau richtig!","Toll!"])
+                       : (ex.explain||"Schau noch einmal genau hin.");
+    fb.append(msg);
+    if(ok)Sound.good(); else Sound.wrong();
+    if(ok){
+      fb.append(el("button",{class:"btn green",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");cont();}},"Weiter →"));
+    }else{
+      fb.append(el("button",{class:"btn blue",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");retry();}},"Nochmal →"));
+    }
+    function retry(){
+      const host=fb.previousSibling;
+      host.innerHTML=""; renderExercise(ex,host,{
+        done:(ok2)=>{ afterAnswer(ok2,ex,fb,()=>{i++;next();}); },
+        wrong:()=>{wrongTotal++;}
+      });
+    }
+  }
+
+  function finish(){
+    Store.clearProgress();
+    let stars = wrongTotal===0?3 : (wrongTotal<=2?2:1);
+    Store.setStars(id,stars); updTotal();
+    const isMaster = id==="meister";
+    const scr=el("div",{class:"result screen"});
+    scr.append(stationHeader(id,"Geschafft!"));
+    const card=el("div",{class:"card center"});
+    card.append(el("div",{class:"huge"}, isMaster?"🏆 MEISTER! 🏆":"Geschafft! 🎉"));
+    const st=el("div",{class:"bigstars"});
+    for(let k=0;k<3;k++)st.append(el("span",{class:"s"},"★"));
+    card.append(st);
+    card.append(el("p",{class:"big"}, stars===3?"Perfekt – ganz ohne Fehler!":stars===2?"Sehr gut gemacht!":"Geschafft – Übung macht den Meister!"));
+    if(isMaster){
+      card.append(el("div",{class:"badge"},"🏅"));
+      card.append(el("p",{html:"Du bist jetzt <b>Wörter-Detektiv</b>! Du erkennst Nomen und Verben."}));
+    }
+    const nav=el("div",{style:"margin-top:10px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+    nav.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();renderHub();}},"🗺️ Zur Karte"));
+    nav.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();startStation(id);}},"↻ Nochmal"));
+    const idx=STATIONS.findIndex(s=>s.id===id);
+    if(idx<STATIONS.length-1){
+      nav.append(el("button",{class:"btn",onclick:()=>{Sound.click();startStation(STATIONS[idx+1].id);}},"Nächste Station →"));
+    }
+    card.append(nav);
+    scr.append(card);
+    setScreen(scr);
+    setTimeout(()=>{ const ss=$$(".bigstars .s");
+      for(let k=0;k<stars;k++)setTimeout(()=>{ss[k].classList.add("on");Sound.good();},k*350);
+    },200);
+    if(stars>=3||isMaster){Confetti.burst(isMaster?240:160);Sound.win();}
+    else if(stars===2){Confetti.burst(90);Sound.good();}
+  }
+}
+
+/* =========================================================================
+   ÜBUNGS-RENDERER  (mc, tf, sort)
+   ========================================================================= */
+function renderExercise(ex,host,api){ (RENDER[ex.type]||RENDER.mc)(ex,host,api); }
+const RENDER={};
+
+RENDER.mc=(ex,host,api)=>{
+  if(ex.mascot) host.append(mascotRow(ex.mascot,"think"));
+  host.append(el("div",{class:"center big",style:"margin-bottom:10px",html:ex.q}));
+  const box=el("div",{class:"center",style:"display:flex;flex-direction:column;gap:10px;align-items:center"});
+  shuffle(ex.options).forEach(o=>{
+    const b=el("button",{class:"btn lg",html:o.label,onclick:()=>{
+      if(o.ok){ b.classList.add("green"); Sound.click(); api.done(true); }
+      else{ b.classList.add("gray"); b.setAttribute("disabled",""); Sound.wrong(); api.wrong(); api.done(false); }
+    }});
+    box.append(b);
+  });
+  host.append(box);
+};
+
+RENDER.tf=(ex,host,api)=>{
+  if(ex.mascot) host.append(mascotRow(ex.mascot,"think"));
+  host.append(el("div",{class:"center big",style:"margin-bottom:12px",html:ex.q}));
+  const box=el("div",{class:"center",style:"display:flex;gap:12px;justify-content:center"});
+  [["👍 Stimmt",true],["👎 Stimmt nicht",false]].forEach(([lab,val])=>{
+    box.append(el("button",{class:"btn lg "+(val?"green":"blue"),html:lab,onclick:()=>{
+      const ok=(val===ex.answer); Sound.click(); if(!ok)api.wrong(); api.done(ok);
+    }}));
+  });
+  host.append(box);
+};
+
+RENDER.sort=(ex,host,api)=>{
+  if(ex.mascot) host.append(mascotRow(ex.mascot,"think"));
+  host.append(el("div",{class:"center big",style:"margin-bottom:8px",html:ex.q||"Sortiere die Wörter!"}));
+  const wrap=el("div",{class:"sortwrap"});
+  const bucketEls={};
+  ex.buckets.forEach(bk=>{
+    const b=el("div",{class:"bucket"});
+    b.append(el("h3",{},bk.emoji+" "+bk.head));
+    const drop=el("div",{class:"chips"});
+    b.append(drop);
+    bucketEls[bk.id]=drop;
+    b.addEventListener("click",()=>place(bk.id,b));
+    wrap.append(b);
+  });
+  host.append(wrap);
+  const tray=el("div",{class:"chips"});
+  host.append(tray);
+  let sel=null, remaining=ex.items.length;
+  shuffle(ex.items).forEach(it=>{
+    const chip=el("div",{class:"chip"},it.t);
+    chip.addEventListener("click",()=>{
+      if(chip.classList.contains("placed"))return;
+      if(sel)sel.classList.remove("sel");
+      sel=chip; chip.classList.add("sel"); Sound.click();
+    });
+    chip._item=it; tray.append(chip);
+  });
+  function place(bucketId,bEl){
+    if(!sel)return;
+    const it=sel._item;
+    if(it.b===bucketId){
+      sel.classList.remove("sel"); sel.classList.add("placed","ok");
+      bucketEls[bucketId].append(sel);
+      sel=null; Sound.good();
+      if(--remaining===0) api.done(true);
+    }else{
+      Sound.wrong(); api.wrong();
+      bEl.classList.add("hot"); setTimeout(()=>bEl.classList.remove("hot"),300);
+      toast("Das passt zur anderen Gruppe – probier es nochmal!");
+    }
+  }
+};
+
+/* =========================================================================
+   INHALTE
+   ========================================================================= */
+const STATION_DATA={};
+
+STATION_DATA.nomen={
+  teach:[
+    { mascot:"Ein <b>Nomen</b> ist ein <b>Namenwort</b>. Es ist der Name für Menschen, Tiere, Pflanzen oder Dinge.",
+      title:"Was ist ein Nomen? 🧍",
+      html:`<div style="font-size:1.1rem;line-height:1.9;text-align:left;max-width:420px;margin:0 auto">
+        👦 Menschen: <b>Kind, Mama, Lehrer</b><br>
+        🐶 Tiere: <b>Hund, Katze, Pferd</b><br>
+        🌳 Pflanzen: <b>Baum, Blume</b><br>
+        🪑 Dinge: <b>Tisch, Ball, Haus</b></div>` },
+    { mascot:"Zwei Merkmale helfen dir immer!",
+      render(body){
+        body.append(el("h2",{class:"center"},"So erkennst du ein Nomen"));
+        body.append(el("div",{class:"center",style:"font-size:1.15rem;line-height:2;margin-top:6px",
+          html:"1️⃣ Man schreibt es <b>GROSS</b> ✍️<br>2️⃣ Ein Begleiter passt davor: <b>der / die / das</b><br><br><span class='muted'>der Hund · die Blume · das Haus</span>"}));
+      } }
+  ],
+  exercises:[
+    { type:"mc", q:"Welches Wort ist ein <b>Nomen</b> (Namenwort)?",
+      options:[{label:"Hund",ok:true},{label:"laufen",ok:false},{label:"schnell",ok:false}],
+      explain:"<b>Hund</b> ist ein Tier – also ein Nomen. Man kann „der Hund“ sagen." },
+    { type:"mc", q:"Ist das ein Nomen?<br><span class='bigword'>Baum</span>",
+      options:[{label:"🧍 Ja, ein Nomen",ok:true},{label:"🏃 Nein",ok:false}],
+      explain:"„der Baum“ – man kann der/die/das davor setzen. Das ist ein <b>Nomen</b>." },
+    { type:"tf", q:"Nomen schreibt man <b>groß</b>.", answer:true,
+      explain:"Richtig! Nomen schreibt man immer groß: der <b>T</b>isch, die <b>B</b>lume." },
+    { type:"mc", mascot:"Welcher Begleiter passt?",
+      q:"Was passt vor <b>Katze</b>?",
+      options:[{label:"die Katze",ok:true},{label:"laufen Katze",ok:false},{label:"schnell Katze",ok:false}],
+      explain:"„<b>die</b> Katze“ passt. Begleiter der/die/das zeigen: hier ist ein Nomen." },
+    { type:"mc", q:"Welches Wort ist ein <b>Nomen</b>?",
+      options:[{label:"Fenster",ok:true},{label:"springen",ok:false},{label:"lustig",ok:false}],
+      explain:"„das Fenster“ ist ein Ding – ein <b>Nomen</b>." }
+  ]
+};
+
+STATION_DATA.verben={
+  teach:[
+    { mascot:"Ein <b>Verb</b> ist ein <b>Tuwort</b>. Es sagt, was jemand <b>tut</b> oder was <b>passiert</b>.",
+      title:"Was ist ein Verb? 🏃",
+      html:`<div style="font-size:1.1rem;line-height:1.9;text-align:left;max-width:420px;margin:0 auto">
+        🏃 <b>laufen</b> · 🤸 <b>springen</b> · 😄 <b>lachen</b><br>
+        🍎 <b>essen</b> · 😴 <b>schlafen</b> · 🎵 <b>singen</b><br><br>
+        Frag dich: <b>Kann ich das TUN?</b> → dann ist es ein Verb.</div>` },
+    { mascot:"Kleiner Tipp!",
+      render(body){
+        body.append(el("h2",{class:"center"},"So erkennst du ein Verb"));
+        body.append(el("div",{class:"center",style:"font-size:1.15rem;line-height:2;margin-top:6px",
+          html:"✅ Man kann es <b>tun</b>: „Ich <b>laufe</b>.“<br>✍️ Verben schreibt man <b>klein</b> (außer am Satzanfang)."}));
+      } }
+  ],
+  exercises:[
+    { type:"mc", q:"Welches Wort ist ein <b>Verb</b> (Tuwort)?",
+      options:[{label:"springen",ok:true},{label:"Ball",ok:false},{label:"rot",ok:false}],
+      explain:"<b>springen</b> kann man tun – das ist ein Verb." },
+    { type:"mc", q:"Ist das ein Verb?<br><span class='bigword'>singen</span>",
+      options:[{label:"🏃 Ja, ein Verb",ok:true},{label:"🧍 Nein",ok:false}],
+      explain:"„Ich <b>singe</b>.“ – man kann es tun. Das ist ein <b>Verb</b>." },
+    { type:"tf", q:"Ein Verb sagt, was man <b>tut</b>.", answer:true,
+      explain:"Genau! laufen, essen, lachen – alles Tuwörter." },
+    { type:"mc", mascot:"Was kann man TUN?",
+      q:"Welches Wort kann man <b>tun</b>?",
+      options:[{label:"essen",ok:true},{label:"Tisch",ok:false},{label:"Blume",ok:false}],
+      explain:"<b>essen</b> ist eine Tätigkeit – ein Verb." },
+    { type:"mc", q:"Welches Wort ist ein <b>Verb</b>?",
+      options:[{label:"schlafen",ok:true},{label:"Bett",ok:false},{label:"müde",ok:false}],
+      explain:"<b>schlafen</b> kann man tun – ein Verb. „Bett“ ist ein Nomen." }
+  ]
+};
+
+STATION_DATA.unterscheiden={
+  teach:[
+    { mascot:"Jetzt kombinieren wir beides! Der <b>Detektiv-Trick</b>:",
+      render(body){
+        body.append(el("h2",{class:"center"},"Nomen oder Verb? 🔎"));
+        body.append(el("div",{class:"center",style:"font-size:1.12rem;line-height:2;margin-top:6px",
+          html:"🧍 Passt <b>der/die/das</b> davor &amp; schreibt man es groß? → <b>Nomen</b><br>🏃 Kann ich es <b>tun</b>? → <b>Verb</b>"}));
+      } }
+  ],
+  exercises:[
+    { type:"sort", mascot:"Ziehe – tippe erst ein Wort, dann die richtige Gruppe!",
+      q:"Sortiere: Nomen oder Verb?",
+      buckets:[{id:"nomen",head:"Nomen",emoji:"🧍"},{id:"verben",head:"Verben",emoji:"🏃"}],
+      items:[{t:"Hund",b:"nomen"},{t:"laufen",b:"verben"},{t:"Tisch",b:"nomen"},
+             {t:"singen",b:"verben"},{t:"Blume",b:"nomen"},{t:"springen",b:"verben"}],
+      explain:"Nomen: Hund, Tisch, Blume. Verben: laufen, singen, springen." },
+    { type:"mc", q:"Was ist <b>Haus</b>?",
+      options:[{label:"🧍 Nomen",ok:true},{label:"🏃 Verb",ok:false}],
+      explain:"„das Haus“ – ein Ding, also ein <b>Nomen</b>." },
+    { type:"mc", q:"Was ist <b>lachen</b>?",
+      options:[{label:"🏃 Verb",ok:true},{label:"🧍 Nomen",ok:false}],
+      explain:"Lachen kann man tun – ein <b>Verb</b>." },
+    { type:"tf", q:"<b>der Ball</b> – „Ball“ ist ein Verb.", answer:false,
+      explain:"Nein! „der Ball“ ist ein Ding mit Begleiter – ein <b>Nomen</b>." }
+  ]
+};
+
+STATION_DATA.meister={
+  teach:[
+    { mascot:"Zeig, dass du ein echter <b>Wörter-Detektiv</b> bist! 🕵️ Ich glaube an dich!", mood:"cheer",
+      render(body){
+        body.append(el("h2",{class:"center"},"🏆 Meister-Challenge 🏆"));
+        body.append(el("div",{class:"center big"},"Alles zusammen: Nomen und Verben erkennen und sortieren."));
+      } }
+  ],
+  exercises:[
+    { type:"mc", q:"① Welches Wort ist ein <b>Nomen</b>?",
+      options:[{label:"Schule",ok:true},{label:"gehen",ok:false},{label:"schön",ok:false}],
+      explain:"„die Schule“ – ein Nomen." },
+    { type:"mc", q:"② Was ist <b>trinken</b>?",
+      options:[{label:"🏃 Verb",ok:true},{label:"🧍 Nomen",ok:false}],
+      explain:"Trinken kann man tun – ein Verb." },
+    { type:"sort", q:"③ Sortiere richtig!",
+      buckets:[{id:"nomen",head:"Nomen",emoji:"🧍"},{id:"verben",head:"Verben",emoji:"🏃"}],
+      items:[{t:"Vogel",b:"nomen"},{t:"fliegen",b:"verben"},{t:"Auto",b:"nomen"},{t:"fahren",b:"verben"}],
+      explain:"Nomen: Vogel, Auto. Verben: fliegen, fahren." },
+    { type:"tf", q:"④ Nomen schreibt man <b>klein</b>.", answer:false,
+      explain:"Falsch – Nomen schreibt man <b>groß</b>!" },
+    { type:"mc", q:"⑤ Welches Wort kann man <b>tun</b>?",
+      options:[{label:"malen",ok:true},{label:"Stift",ok:false},{label:"bunt",ok:false}],
+      explain:"<b>malen</b> ist ein Verb. „Stift“ ist ein Nomen." }
+  ]
+};
+
+/* ---- Nach dem Laden zum richtigen Bildschirm --------------------------- */
+function routeStart(){
+  updTotal();
+  const r=Store.getProgress();
+  if(r && STATION_DATA[r.id]) startStation(r.id,r);
+  else renderHub();
+}
+
+/* ---- Ton-Schalter ------------------------------------------------------ */
+$("#soundBtn").addEventListener("click",function(){
+  const on=!Sound.get();Sound.set(on);this.textContent=on?"🔊":"🔇";if(on)Sound.click();
+});
+
+/* ---- Start: gemeinsamen Spielstand laden/synchronisieren, dann anzeigen - */
+SchoolCloud.bootSync(routeStart);
+
+/* dekorative Wolken */
+(function clouds(){const b=document.body;for(let i=0;i<4;i++){const c=el("div",{class:"cloud"});
+  c.style.top=(8+i*16)+"%";c.style.width=(60+rnd(0,60))+"px";c.style.height=(20+rnd(0,14))+"px";
+  c.style.animationDuration=(40+rnd(0,40))+"s";c.style.animationDelay=(-rnd(0,40))+"s";b.append(c);}})();
+</script>
+</body>
+</html>
