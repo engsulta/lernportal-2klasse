@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Wörter-Detektiv 🔎 – Nomen & Verben</title>
 <link rel="stylesheet" href="../../shared/styles.css">
+<link rel="manifest" href="../../manifest.webmanifest">
+<meta name="theme-color" content="#7ec8ff">
+<link rel="apple-touch-icon" href="../../icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Lernportal">
 <style>
 /* thema-spezifische Kleinigkeiten (Rest kommt aus shared/styles.css) */
 .emoji-mascot{display:flex;align-items:center;justify-content:center;font-size:60px;
@@ -541,6 +548,9 @@ $("#soundBtn").addEventListener("click",function(){
 
 /* ---- Start: gemeinsamen Spielstand laden/synchronisieren, dann anzeigen - */
 SchoolCloud.bootSync(routeStart);
+
+/* App-Installation & Offline-Betrieb */
+if("serviceWorker" in navigator){ window.addEventListener("load",()=>navigator.serviceWorker.register("../../sw.js").catch(()=>{})); }
 
 /* dekorative Wolken */
 (function clouds(){const b=document.body;for(let i=0;i<4;i++){const c=el("div",{class:"cloud"});
