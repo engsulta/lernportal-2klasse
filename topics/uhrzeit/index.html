@@ -989,7 +989,7 @@ STATION_DATA.viertel={
         body.append(el("h2",{class:"center"},"Viertel nach 🕝"));
         const {w}=clockWrap({h:3,m:15});
         body.append(w);
-        body.append(el("div",{class:"center big"},"Großer Zeiger auf der <b>3</b> = 15 Minuten"));
+        body.append(el("div",{class:"center big",html:"Großer Zeiger auf der <b>3</b> = 15 Minuten"}));
         body.append(el("div",{class:"center huge",style:"color:var(--brand-d)"},"Viertel nach 3"));
         body.append(el("div",{class:"center muted"},"(3:15 · im Buch auch: „viertel 4“)"));
       } },
@@ -998,7 +998,7 @@ STATION_DATA.viertel={
         body.append(el("h2",{class:"center"},"Viertel vor 🕤"));
         const {w}=clockWrap({h:9,m:45});
         body.append(w);
-        body.append(el("div",{class:"center big"},"Großer Zeiger auf der <b>9</b> = 15 Minuten vor voll"));
+        body.append(el("div",{class:"center big",html:"Großer Zeiger auf der <b>9</b> = 15 Minuten vor voll"}));
         body.append(el("div",{class:"center huge",style:"color:var(--brand-d)"},"Viertel vor 10"));
         body.append(el("div",{class:"center muted"},"(9:45 · im Buch auch: „drei viertel 10“)"));
       } }
@@ -1050,7 +1050,7 @@ STATION_DATA.minuten={
         body.append(el("h2",{class:"center"},"Zählen in 5er-Schritten"));
         const {w}=clockWrap({h:4,m:5});
         body.append(w);
-        body.append(el("div",{class:"center big"},"Großer Zeiger auf der <b>1</b> = 5 Minuten"));
+        body.append(el("div",{class:"center big",html:"Großer Zeiger auf der <b>1</b> = 5 Minuten"}));
         body.append(el("div",{class:"center huge",style:"color:var(--brand-d)"},"5 nach 4"));
       } },
     { mascot:"In der <b>ersten</b> Hälfte sagen wir „<b>nach</b>“, in der <b>zweiten</b> Hälfte „<b>vor</b>“.",
@@ -1058,7 +1058,7 @@ STATION_DATA.minuten={
         body.append(el("h2",{class:"center"},"„nach“ und „vor“"));
         const {w}=clockWrap({h:4,m:50});
         body.append(w);
-        body.append(el("div",{class:"center big"},"Großer Zeiger auf der <b>10</b> = 10 Minuten vor voll"));
+        body.append(el("div",{class:"center big",html:"Großer Zeiger auf der <b>10</b> = 10 Minuten vor voll"}));
         body.append(el("div",{class:"center huge",style:"color:var(--brand-d)"},"10 vor 5"));
       } }
   ],
@@ -1106,7 +1106,7 @@ STATION_DATA.digital={
         row.append(el("div",{style:"font-size:1.8rem"},"="));
         row.append(el("span",{class:"digital"},"08:30"));
         body.append(row);
-        body.append(el("div",{class:"center big"},"Beides bedeutet: <b>halb 9</b> (8 Uhr 30)"));
+        body.append(el("div",{class:"center big",html:"Beides bedeutet: <b>halb 9</b> (8 Uhr 30)"}));
       } },
     { mascot:"Ein Tag hat 24 Stunden. Nach 12 Uhr mittags zählen wir weiter: 13, 14, 15 … bis 24!",
       render(body){
@@ -1116,7 +1116,7 @@ STATION_DATA.digital={
         row.append(el("div",{style:"font-size:1.6rem"},"≠"));
         row.append(labeled(el("span",{class:"digital red"},"13:15"),"1 Uhr (nachmittags)"));
         body.append(row);
-        body.append(el("div",{class:"center big",style:"margin-top:8px"},"Nachmittags: <b>Stunde + 12</b><br>1 Uhr → 13 Uhr, 5 Uhr → 17 Uhr, 8 Uhr → 20 Uhr"));
+        body.append(el("div",{class:"center big",style:"margin-top:8px",html:"Nachmittags: <b>Stunde + 12</b><br>1 Uhr → 13 Uhr, 5 Uhr → 17 Uhr, 8 Uhr → 20 Uhr"}));
       } }
   ],
   exercises:[
