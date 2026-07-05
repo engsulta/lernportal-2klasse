@@ -85,13 +85,75 @@ function renderPortal(){
   wrap.append(grid);
 
   const foot=el("div",{class:"center",style:"margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  foot.append(el("button",{class:"btn blue",onclick:()=>renderReport()},"📊 Elternbericht"));
   foot.append(el("button",{class:"btn gray",onclick:()=>{
       if(confirm("Wirklich den Fortschritt in ALLEN Themen zurücksetzen?")){ SchoolCloud.resetAll(); renderPortal(); }
     }},"↺ Alles zurücksetzen"));
   if(SchoolCloud.ready()){
-    foot.append(el("button",{class:"btn blue",onclick:()=>SchoolCloud.showCodeScreen(false,renderPortal)},
+    foot.append(el("button",{class:"btn gray",onclick:()=>SchoolCloud.showCodeScreen(false,renderPortal)},
       "☁️ Code: "+(SchoolCloud.code()||"—")));
   }
+  wrap.append(foot);
+
+  const host=$("#screen"); host.innerHTML=""; host.append(wrap); window.scrollTo(0,0);
+}
+
+/* =========================================================================
+   ELTERNBERICHT  –  zeigt, bei welchen Fragen die meisten Fehler passieren
+   ========================================================================= */
+function renderReport(){
+  const stats=SchoolCloud.getStats();
+  const topicName=id=>{ const t=TOPICS.find(x=>x.id===id); return t?t.name:id; };
+  const wrap=el("div",{class:"screen"});
+  wrap.append(el("h1",{class:"hub-title"},"📊 Elternbericht"));
+  wrap.append(el("div",{class:"hub-sub"},"Wo passieren die meisten Fehler?"));
+
+  const card=el("div",{class:"card"});
+  const topicIds=Object.keys(stats);
+  let totalWrong=0, totalSeen=0;
+
+  if(topicIds.length===0){
+    card.append(el("div",{class:"center muted",style:"padding:24px 8px"},
+      "Noch keine Daten. Sobald geübt wird, siehst du hier, welche Fragen schwerfallen und wie oft ein Fehler passiert ist."));
+  }
+  topicIds.forEach(tid=>{
+    const entries=Object.values(stats[tid]||{});
+    const tWrong=entries.reduce((s,e)=>s+(e.wrong||0),0);
+    const tSeen =entries.reduce((s,e)=>s+(e.seen||0),0);
+    totalWrong+=tWrong; totalSeen+=tSeen;
+    card.append(el("h2",{style:"margin:16px 0 4px"}, topicName(tid),
+      el("span",{class:"muted",style:"font-size:1rem;font-weight:700"}, "  · "+tWrong+" Fehler")));
+    const struggles=entries.filter(e=>(e.wrong||0)>0).sort((a,b)=>(b.wrong||0)-(a.wrong||0));
+    if(struggles.length===0){
+      card.append(el("div",{class:"muted",style:"margin:2px 0 6px"},"✅ Keine Fehler – super gemacht!"));
+    } else {
+      struggles.forEach(e=>{
+        const row=el("div",{style:"display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-bottom:1px solid #eef2f7"});
+        row.append(el("div",{style:"font-weight:900;color:var(--red-d);min-width:56px;text-align:right"}, "❌ "+(e.wrong||0)+"×"));
+        const txt=el("div",{style:"flex:1"});
+        txt.append(el("div",{style:"font-weight:700"}, e.label||"(Frage)"));
+        const meta=[];
+        if(e.station) meta.push("Station: "+e.station);
+        meta.push((e.seen||0)+"× bearbeitet");
+        if(e.lastAt) meta.push("zuletzt "+new Date(e.lastAt).toLocaleDateString("de-DE"));
+        txt.append(el("div",{class:"muted",style:"font-size:.9rem"}, meta.join(" · ")));
+        row.append(txt);
+        card.append(row);
+      });
+    }
+  });
+  wrap.append(card);
+
+  if(topicIds.length){
+    wrap.append(el("div",{class:"center muted",style:"margin-top:8px"},
+      "Insgesamt "+totalWrong+" Fehler bei "+totalSeen+" bearbeiteten Fragen."));
+  }
+
+  const foot=el("div",{class:"center",style:"margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  foot.append(el("button",{class:"btn green",onclick:()=>renderPortal()},"← Zurück"));
+  foot.append(el("button",{class:"btn gray",onclick:()=>{
+      if(confirm("Fehler-Bericht zurücksetzen? (Der Spielstand mit den Sternen bleibt erhalten.)")){ SchoolCloud.resetStats(); renderReport(); }
+    }},"🧹 Bericht leeren"));
   wrap.append(foot);
 
   const host=$("#screen"); host.innerHTML=""; host.append(wrap); window.scrollTo(0,0);

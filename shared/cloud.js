@@ -18,7 +18,7 @@ window.SchoolCloud = (function(){
   const CODE_KEY="school2ndyear_code";
   const OLD_UHRZEIT_KEY="zeitabenteuer_uhrzeit_v1";   // Migration aus der frueheren Einzel-App
 
-  let data={topics:{},_t:0};
+  let data={topics:{},stats:{},_t:0};
   let code="";
 
   /* ---- Firebase / Firestore-REST ---------------------------------------- */
@@ -75,12 +75,40 @@ window.SchoolCloud = (function(){
     out.progress=(a._t||0)>=(b._t||0)?a.progress:b.progress;
     return out;
   }
+  function mergeStats(a,b){          // Zaehler je Frage: Maximum nehmen (idempotent, kein Doppelzaehlen)
+    a=a||{}; b=b||{}; const out={};
+    new Set([...Object.keys(a),...Object.keys(b)]).forEach(t=>{
+      const at=a[t]||{}, bt=b[t]||{}; out[t]={};
+      new Set([...Object.keys(at),...Object.keys(bt)]).forEach(k=>{
+        const ae=at[k]||{}, be=bt[k]||{};
+        out[t][k]={
+          station: ae.station||be.station||"",
+          label:   ae.label||be.label||"",
+          seen:  Math.max(ae.seen||0, be.seen||0),
+          wrong: Math.max(ae.wrong||0, be.wrong||0),
+          lastAt:Math.max(ae.lastAt||0, be.lastAt||0)
+        };
+      });
+    });
+    return out;
+  }
   function mergeData(a,b){
     if(!b) return a; if(!a) return b;
-    const out={topics:{},_t:Math.max(a._t||0,b._t||0)};
+    const out={topics:{},stats:{},_t:Math.max(a._t||0,b._t||0)};
     new Set([...Object.keys(a.topics||{}),...Object.keys(b.topics||{})]).forEach(id=>{
       out.topics[id]=mergeTopic((a.topics||{})[id],(b.topics||{})[id]); });
+    out.stats=mergeStats(a.stats,b.stats);
     return out;
+  }
+
+  /* ---- Fehler-Statistik (fuer den Elternbericht) ------------------------- */
+  function stripTags(s){ return String(s||"").replace(/<[^>]+>/g," ").replace(/&[a-z]+;/gi," ").replace(/\s+/g," ").replace(/\s+([?!.,:;])/g,"$1").trim(); }
+  function statNode(topic,stationId,exi){
+    if(!data.stats) data.stats={};
+    if(!data.stats[topic]) data.stats[topic]={};
+    const key=stationId+"#"+exi;
+    if(!data.stats[topic][key]) data.stats[topic][key]={station:"",label:"",seen:0,wrong:0,lastAt:0};
+    return data.stats[topic][key];
   }
 
   /* ---- Thema-Objekt: gleiche Schnittstelle wie der alte Store ------------- */
@@ -94,14 +122,19 @@ window.SchoolCloud = (function(){
       saveProgress(p){ const c=slice(id); c.progress=p; c._t=Date.now(); persist(); },
       clearProgress(){ const c=slice(id); if(c.progress){ c.progress=null; c._t=Date.now(); persist(); } },
       getProgress(){ return slice(id).progress; },
-      reset(){ data.topics[id]={stars:{},done:{},progress:null,_t:Date.now()}; persist(); }
+      reset(){ data.topics[id]={stars:{},done:{},progress:null,_t:Date.now()}; persist(); },
+      // Fehler-Protokoll fuer den Elternbericht:
+      recordSeen(stationId,exi,label,stationName){ const n=statNode(id,stationId,exi); if(stationName)n.station=stationName; n.label=stripTags(label); n.seen=(n.seen||0)+1; persist(); },
+      recordWrong(stationId,exi,label,stationName){ const n=statNode(id,stationId,exi); if(stationName)n.station=stationName; n.label=stripTags(label); n.wrong=(n.wrong||0)+1; n.lastAt=Date.now(); persist(); }
     };
   }
 
   /* ---- Uebersicht fuers Portal ------------------------------------------- */
   function topicTotal(id){ const t=data.topics[id]; return t?Object.values(t.stars).reduce((a,b)=>a+b,0):0; }
   function grandTotal(){ return Object.keys(data.topics).reduce((s,id)=>s+topicTotal(id),0); }
-  function resetAll(){ data={topics:{},_t:Date.now()}; persist(); }
+  function resetAll(){ data={topics:{},stats:{},_t:Date.now()}; persist(); }
+  function getStats(){ return data.stats||{}; }
+  function resetStats(){ data.stats={}; persist(); }
 
   /* ---- kleiner Toast (nutzt #toast der Seite, sonst still) --------------- */
   let tT=null;
@@ -166,6 +199,7 @@ window.SchoolCloud = (function(){
   return {
     ready, code:()=>code, setCode,
     store, topicTotal, grandTotal, resetAll,
+    getStats, resetStats,
     mergeData, bootSync, showCodeScreen, toast
   };
 })();

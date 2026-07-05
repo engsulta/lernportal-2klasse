@@ -242,12 +242,16 @@ function startStation(id,resume){
 function runExercises(id,list,resume){
   let i=resume && resume.i<list.length ? resume.i : 0,
       wrongTotal=resume ? resume.wrongTotal||0 : 0;
+  const stName=()=>(STATIONS.find(s=>s.id===id)||{}).n;
+  const exLbl=()=>list[i] ? (list[i].q||list[i].prompt||("Aufgabe "+(i+1))) : "";
+  const logWrong=()=>Store.recordWrong(id,i,exLbl(),stName());   // Elternbericht: Fehler zählen
   next();
 
   function next(){
     if(i>=list.length){ return finish(); }
     Store.saveProgress({id, i, wrongTotal});
     const ex=list[i];
+    Store.recordSeen(id,i,exLbl(),stName());   // Elternbericht: Frage gesehen
     const scr=el("div",{class:"screen"});
     scr.append(stationHeader(id));
     const pr=el("div",{class:"card"});
@@ -265,7 +269,7 @@ function runExercises(id,list,resume){
     const api={
       done:(ok)=>{ if(ok){ fill.style.width=((i+1)/list.length*100)+"%"; }
         afterAnswer(ok,ex,fb,()=>{ i++; next(); }); },
-      wrong:()=>{ wrongTotal++; }
+      wrong:()=>{ wrongTotal++; logWrong(); }
     };
     renderExercise(ex,host,api);
   }
@@ -290,7 +294,7 @@ function runExercises(id,list,resume){
       const host=fb.previousSibling;
       host.innerHTML=""; renderExercise(ex,host,{
         done:(ok2)=>{ afterAnswer(ok2,ex,fb,()=>{i++;next();}); },
-        wrong:()=>{wrongTotal++;}
+        wrong:()=>{wrongTotal++; logWrong();}
       });
     }
   }

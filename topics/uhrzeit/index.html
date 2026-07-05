@@ -430,6 +430,9 @@ function runExercises(id,list,resume){
       correctCount=resume ? resume.correctCount||0 : 0,
       attemptsThis=0,
       wrongTotal=resume ? resume.wrongTotal||0 : 0;
+  const stName=()=>(STATIONS.find(s=>s.id===id)||{}).n;
+  const exLbl=()=>list[i] ? (list[i].q||list[i].prompt||("Aufgabe "+(i+1))) : "";
+  const logWrong=()=>Store.recordWrong(id,i,exLbl(),stName());   // Elternbericht: Fehler zählen
   next();
 
   function next(){
@@ -437,6 +440,7 @@ function runExercises(id,list,resume){
     // Position sichern, damit man nach einem Neuladen genau hier weitermacht
     Store.saveProgress({id, i, correctCount, wrongTotal});
     const ex=list[i]; attemptsThis=0;
+    Store.recordSeen(id,i,exLbl(),stName());   // Elternbericht: Frage gesehen
     const scr=el("div",{class:"screen"});
     scr.append(stationHeader(id));
     // Fortschritt
@@ -457,7 +461,7 @@ function runExercises(id,list,resume){
         if(ok){correctCount++; fill.style.width=((i+1)/list.length*100)+"%";}
         afterAnswer(ok,ex,fb,()=>{ i++; next(); });
       },
-      wrong:()=>{attemptsThis++; wrongTotal++;},
+      wrong:()=>{attemptsThis++; wrongTotal++; logWrong();},
       attempts:()=>attemptsThis,
       feedback:fb
     };
@@ -486,7 +490,7 @@ function runExercises(id,list,resume){
       const host=fb.previousSibling; // card
       host.innerHTML=""; renderExercise(ex,host,{
         done:(ok2)=>{ if(ok2){correctCount++;} afterAnswer(ok2,ex,fb,()=>{i++;next();}); },
-        wrong:()=>{wrongTotal++;}, attempts:()=>1, feedback:fb
+        wrong:()=>{wrongTotal++; logWrong();}, attempts:()=>1, feedback:fb
       });
     }
   }
