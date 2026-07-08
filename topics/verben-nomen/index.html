@@ -551,16 +551,28 @@ $("#soundBtn").addEventListener("click",function(){
 });
 
 /* ---- Einzelne Frage aus dem Elternbericht üben ------------------------- */
+const TOPIC_ID="verben-nomen";
+let practiceTimer=null;
 function runPractice(stationId, exi){
+  clearTimeout(practiceTimer);
   const data=STATION_DATA[stationId];
   const ex = data && data.exercises && data.exercises[+exi];
-  const back=()=>{ location.href="../../index.html#report"; };
+  const back=()=>{ clearTimeout(practiceTimer); location.href="../../index.html#report"; };
   if(!ex){ back(); return; }
+  function goNext(){                 // zur nächsten offenen Frage (erst dieses Thema, dann andere)
+    clearTimeout(practiceTimer);
+    const open=SchoolCloud.openQuestions();
+    if(open.length===0){ back(); return; }
+    const nx=open.filter(q=>q.topic===TOPIC_ID)[0]||open[0];
+    if(nx.topic===TOPIC_ID) runPractice(nx.station, nx.exi);
+    else location.href="../"+nx.topic+"/index.html#practice="+encodeURIComponent(nx.station+":"+nx.exi);
+  }
   const scr=el("div",{class:"screen"});
   const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
   bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",onclick:back},"← Bericht"));
   bar.append(el("div",{class:"brand"},el("span",{},"🔁 Üben")));
-  bar.append(el("div",{class:"steplabel"},(STATIONS.find(s=>s.id===stationId)||{}).n||""));
+  const openNow=SchoolCloud.openQuestions().length;
+  bar.append(el("div",{class:"steplabel"}, openNow>1 ? ("noch "+openNow+" offen") : ((STATIONS.find(s=>s.id===stationId)||{}).n||"")));
   scr.append(bar);
   scr.append(mascotRow("Übe diese Aufgabe noch einmal – du schaffst das! 💪","think"));
   const host=el("div",{class:"card"}); scr.append(host);
@@ -575,7 +587,9 @@ function runPractice(stationId, exi){
         fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
         const msg=el("div"); msg.innerHTML = ok ? "Richtig gelöst! Klasse! ⭐" : (ex.explain||"Schau noch einmal genau hin."); fb.append(msg);
         if(ok){ Sound.good(); Store.clearStat(stationId, exi);   // gelöst → raus aus dem Bericht
-          fb.append(el("button",{class:"btn green",style:"margin-left:auto",onclick:back},"✓ Zurück zum Bericht"));
+          const more = SchoolCloud.openQuestions().length>0;
+          fb.append(el("button",{class:"btn green",style:"margin-left:auto",onclick:goNext}, more?"Weiter →":"✓ Fertig – zum Bericht"));
+          practiceTimer=setTimeout(goNext, 1500);            // automatisch weiter zur nächsten Frage
         } else { Sound.wrong();
           fb.append(el("button",{class:"btn blue",style:"margin-left:auto",onclick:()=>{fb.classList.remove("show"); render();}},"Nochmal →"));
         }

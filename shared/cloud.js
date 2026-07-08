@@ -138,6 +138,16 @@ window.SchoolCloud = (function(){
   function resetAll(){ data={topics:{},stats:{},_t:Date.now()}; persist(); }
   function getStats(){ return data.stats||{}; }
   function resetStats(){ data.stats={}; persist(); }
+  function openQuestions(){        // offene (noch nicht gelöste) Fehler-Fragen, sortiert wie im Bericht
+    const out=[];
+    Object.keys(data.stats||{}).forEach(t=>{
+      Object.entries(data.stats[t]||{})
+        .filter(([k,e])=>(e.wrong||0)>0 && (e.lastAt||0)>(e.clearedAt||0))
+        .sort((a,b)=>(b[1].wrong||0)-(a[1].wrong||0))
+        .forEach(([k,e])=>{ const s=k.indexOf("#"); out.push({topic:t,station:k.slice(0,s),exi:k.slice(s+1),wrong:e.wrong||0,label:e.label,stationName:e.station}); });
+    });
+    return out;
+  }
 
   /* ---- kleiner Toast (nutzt #toast der Seite, sonst still) --------------- */
   let tT=null;
@@ -202,7 +212,7 @@ window.SchoolCloud = (function(){
   return {
     ready, code:()=>code, setCode,
     store, topicTotal, grandTotal, resetAll,
-    getStats, resetStats,
+    getStats, resetStats, openQuestions,
     mergeData, bootSync, showCodeScreen, toast
   };
 })();
