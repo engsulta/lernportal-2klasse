@@ -110,43 +110,51 @@ function renderReport(){
 
   const card=el("div",{class:"card"});
   const topicIds=Object.keys(stats);
-  let totalWrong=0, totalSeen=0;
+  let totalWrong=0, openCount=0, anyActive=false;
+  const isActive=e=>(e.wrong||0)>0 && (e.lastAt||0)>(e.clearedAt||0);   // offen = Fehler & seit dem letzten Üben nicht gelöst
 
-  if(topicIds.length===0){
-    card.append(el("div",{class:"center muted",style:"padding:24px 8px"},
-      "Noch keine Daten. Sobald geübt wird, siehst du hier, welche Fragen schwerfallen und wie oft ein Fehler passiert ist."));
-  }
   topicIds.forEach(tid=>{
-    const entries=Object.values(stats[tid]||{});
-    const tWrong=entries.reduce((s,e)=>s+(e.wrong||0),0);
-    const tSeen =entries.reduce((s,e)=>s+(e.seen||0),0);
-    totalWrong+=tWrong; totalSeen+=tSeen;
+    const items=Object.entries(stats[tid]||{})
+      .filter(([k,e])=>isActive(e))
+      .sort((a,b)=>(b[1].wrong||0)-(a[1].wrong||0));
+    if(items.length===0) return;
+    anyActive=true;
+    const tWrong=items.reduce((s,[k,e])=>s+(e.wrong||0),0);
+    totalWrong+=tWrong; openCount+=items.length;
     card.append(el("h2",{style:"margin:16px 0 4px"}, topicName(tid),
       el("span",{class:"muted",style:"font-size:1rem;font-weight:700"}, "  · "+tWrong+" Fehler")));
-    const struggles=entries.filter(e=>(e.wrong||0)>0).sort((a,b)=>(b.wrong||0)-(a.wrong||0));
-    if(struggles.length===0){
-      card.append(el("div",{class:"muted",style:"margin:2px 0 6px"},"✅ Keine Fehler – super gemacht!"));
-    } else {
-      struggles.forEach(e=>{
-        const row=el("div",{style:"display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-bottom:1px solid #eef2f7"});
-        row.append(el("div",{style:"font-weight:900;color:var(--red-d);min-width:56px;text-align:right"}, "❌ "+(e.wrong||0)+"×"));
-        const txt=el("div",{style:"flex:1"});
-        txt.append(el("div",{style:"font-weight:700"}, e.label||"(Frage)"));
-        const meta=[];
-        if(e.station) meta.push("Station: "+e.station);
-        meta.push((e.seen||0)+"× bearbeitet");
-        if(e.lastAt) meta.push("zuletzt "+new Date(e.lastAt).toLocaleDateString("de-DE"));
-        txt.append(el("div",{class:"muted",style:"font-size:.9rem"}, meta.join(" · ")));
-        row.append(txt);
-        card.append(row);
-      });
-    }
+    items.forEach(([key,e])=>{
+      const sep=key.indexOf("#"); const station=key.slice(0,sep), exi=key.slice(sep+1);
+      const row=el("div",{style:"display:flex;gap:12px;align-items:center;padding:10px 6px;border-bottom:1px solid #eef2f7;border-radius:12px;cursor:pointer",
+        onclick:()=>{ location.href="topics/"+tid+"/index.html#practice="+encodeURIComponent(station+":"+exi); }});
+      row.addEventListener("mouseenter",()=>row.style.background="#f4f9ff");
+      row.addEventListener("mouseleave",()=>row.style.background="");
+      row.append(el("div",{style:"font-weight:900;color:var(--red-d);min-width:52px;text-align:right"}, "❌ "+(e.wrong||0)+"×"));
+      const txt=el("div",{style:"flex:1"});
+      txt.append(el("div",{style:"font-weight:700"}, e.label||"(Frage)"));
+      const meta=[];
+      if(e.station) meta.push("Station: "+e.station);
+      if(e.lastAt) meta.push("zuletzt "+new Date(e.lastAt).toLocaleDateString("de-DE"));
+      txt.append(el("div",{class:"muted",style:"font-size:.9rem"}, meta.join(" · ")));
+      row.append(txt);
+      row.append(el("div",{style:"font-size:1.3rem;color:var(--blue);font-weight:900"},"▶"));
+      card.append(row);
+    });
   });
+
+  if(!anyActive){
+    card.append(el("div",{class:"center muted",style:"padding:24px 8px"},
+      topicIds.length ? "✅ Keine offenen Fehler – alles gemeistert! Super gemacht. 🎉"
+                      : "Noch keine Daten. Sobald geübt wird, siehst du hier, welche Fragen schwerfallen."));
+  } else {
+    card.append(el("div",{class:"muted center",style:"margin-top:12px;font-size:.9rem"},
+      "👉 Tippe auf eine Frage, um sie noch einmal zu üben. Richtig gelöst = verschwindet aus der Liste."));
+  }
   wrap.append(card);
 
-  if(topicIds.length){
+  if(anyActive){
     wrap.append(el("div",{class:"center muted",style:"margin-top:8px"},
-      "Insgesamt "+totalWrong+" Fehler bei "+totalSeen+" bearbeiteten Fragen."));
+      "Offen: "+openCount+" Frage(n) · "+totalWrong+" Fehler insgesamt."));
   }
 
   const foot=el("div",{class:"center",style:"margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
@@ -159,8 +167,12 @@ function renderReport(){
   const host=$("#screen"); host.innerHTML=""; host.append(wrap); window.scrollTo(0,0);
 }
 
-/* Start: gemeinsamen Spielstand laden/synchronisieren, dann Portal zeigen */
-SchoolCloud.bootSync(renderPortal);
+/* Start: gemeinsamen Spielstand laden/synchronisieren, dann Portal (oder Bericht) zeigen */
+function portalHome(){
+  if(location.hash==="#report"){ history.replaceState(null,"",location.pathname); renderReport(); }
+  else renderPortal();
+}
+SchoolCloud.bootSync(portalHome);
 
 /* App-Installation & Offline-Betrieb */
 if("serviceWorker" in navigator){ window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{})); }

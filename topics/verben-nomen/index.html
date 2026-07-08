@@ -550,8 +550,48 @@ $("#soundBtn").addEventListener("click",function(){
   const on=!Sound.get();Sound.set(on);this.textContent=on?"🔊":"🔇";if(on)Sound.click();
 });
 
-/* ---- Start: gemeinsamen Spielstand laden/synchronisieren, dann anzeigen - */
-SchoolCloud.bootSync(routeStart);
+/* ---- Einzelne Frage aus dem Elternbericht üben ------------------------- */
+function runPractice(stationId, exi){
+  const data=STATION_DATA[stationId];
+  const ex = data && data.exercises && data.exercises[+exi];
+  const back=()=>{ location.href="../../index.html#report"; };
+  if(!ex){ back(); return; }
+  const scr=el("div",{class:"screen"});
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",onclick:back},"← Bericht"));
+  bar.append(el("div",{class:"brand"},el("span",{},"🔁 Üben")));
+  bar.append(el("div",{class:"steplabel"},(STATIONS.find(s=>s.id===stationId)||{}).n||""));
+  scr.append(bar);
+  scr.append(mascotRow("Übe diese Aufgabe noch einmal – du schaffst das! 💪","think"));
+  const host=el("div",{class:"card"}); scr.append(host);
+  const fb=el("div",{class:"feedback"}); scr.append(fb);
+  setScreen(scr);
+  render();
+  function render(){
+    host.innerHTML="";
+    renderExercise(ex, host, {
+      done:(ok)=>{
+        fb.className="feedback show "+(ok?"ok":"no"); fb.innerHTML="";
+        fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+        const msg=el("div"); msg.innerHTML = ok ? "Richtig gelöst! Klasse! ⭐" : (ex.explain||"Schau noch einmal genau hin."); fb.append(msg);
+        if(ok){ Sound.good(); Store.clearStat(stationId, exi);   // gelöst → raus aus dem Bericht
+          fb.append(el("button",{class:"btn green",style:"margin-left:auto",onclick:back},"✓ Zurück zum Bericht"));
+        } else { Sound.wrong();
+          fb.append(el("button",{class:"btn blue",style:"margin-left:auto",onclick:()=>{fb.classList.remove("show"); render();}},"Nochmal →"));
+        }
+      },
+      wrong:()=>{}               // Übungsmodus: keine neuen Fehler zählen
+    });
+  }
+}
+
+/* ---- Start: ggf. Übungsmodus aus dem Bericht, sonst normaler Ablauf ----- */
+function startHere(){
+  const m=/^#practice=([^:]+):(\d+)$/.exec(decodeURIComponent(location.hash||""));
+  if(m){ history.replaceState(null,"",location.pathname); runPractice(m[1], m[2]); return; }
+  routeStart();
+}
+SchoolCloud.bootSync(startHere);
 
 /* App-Installation & Offline-Betrieb */
 if("serviceWorker" in navigator){ window.addEventListener("load",()=>navigator.serviceWorker.register("../../sw.js").catch(()=>{})); }

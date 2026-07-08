@@ -86,7 +86,8 @@ window.SchoolCloud = (function(){
           label:   ae.label||be.label||"",
           seen:  Math.max(ae.seen||0, be.seen||0),
           wrong: Math.max(ae.wrong||0, be.wrong||0),
-          lastAt:Math.max(ae.lastAt||0, be.lastAt||0)
+          lastAt:Math.max(ae.lastAt||0, be.lastAt||0),
+          clearedAt:Math.max(ae.clearedAt||0, be.clearedAt||0)
         };
       });
     });
@@ -107,7 +108,7 @@ window.SchoolCloud = (function(){
     if(!data.stats) data.stats={};
     if(!data.stats[topic]) data.stats[topic]={};
     const key=stationId+"#"+exi;
-    if(!data.stats[topic][key]) data.stats[topic][key]={station:"",label:"",seen:0,wrong:0,lastAt:0};
+    if(!data.stats[topic][key]) data.stats[topic][key]={station:"",label:"",seen:0,wrong:0,lastAt:0,clearedAt:0};
     return data.stats[topic][key];
   }
 
@@ -125,7 +126,9 @@ window.SchoolCloud = (function(){
       reset(){ data.topics[id]={stars:{},done:{},progress:null,_t:Date.now()}; persist(); },
       // Fehler-Protokoll fuer den Elternbericht:
       recordSeen(stationId,exi,label,stationName){ const n=statNode(id,stationId,exi); if(stationName)n.station=stationName; n.label=stripTags(label); n.seen=(n.seen||0)+1; persist(); },
-      recordWrong(stationId,exi,label,stationName){ const n=statNode(id,stationId,exi); if(stationName)n.station=stationName; n.label=stripTags(label); n.wrong=(n.wrong||0)+1; n.lastAt=Date.now(); persist(); }
+      recordWrong(stationId,exi,label,stationName){ const n=statNode(id,stationId,exi); if(stationName)n.station=stationName; n.label=stripTags(label); n.wrong=(n.wrong||0)+1; n.lastAt=Date.now(); persist(); },
+      // Frage als "geübt/erledigt" markieren (verschwindet aus dem Bericht, solange kein neuer Fehler passiert)
+      clearStat(stationId,exi){ const n=statNode(id,stationId,exi); n.clearedAt=Date.now(); persist(); }
     };
   }
 
