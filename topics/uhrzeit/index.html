@@ -317,6 +317,7 @@ const STATIONS=[
   {id:"digital",     n:"Digital & 24 Stunden", e:"📟", c:"--blue"},
   {id:"zeitspannen", n:"Zeitspannen", e:"⏳", c:"--brand"},
   {id:"einheiten",   n:"Stunden · Minuten · Sekunden", e:"⏱️", c:"--green"},
+  {id:"sachaufgaben",n:"Zeit im Alltag", e:"🚌", c:"--purple"},
   {id:"meister",     n:"Meister-Challenge", e:"🏆", c:"--gold", master:true},
 ];
 const STATION_DATA={}; // wird im Stations-Abschnitt befüllt
@@ -1275,7 +1276,68 @@ STATION_DATA.einheiten={
   ]
 };
 
-/* ================== STATION 9: MEISTER-CHALLENGE ======================= */
+/* ============= STATION 9: ZEIT IM ALLTAG (Sachaufgaben) ================ */
+STATION_DATA.sachaufgaben={
+  teach:[
+    { mascot:"Jetzt wird's <b>echt</b>! 🚌 Denk an deinen Tag: Termine, Wege, Pausen. So löst du solche Aufgaben:",
+      title:"Zeit im Alltag",
+      html:`<div style="font-size:1.1rem;line-height:1.9;text-align:left;max-width:440px;margin:0 auto">
+        1️⃣ <b>Lies genau:</b> Wann ist der Termin? Wie lange dauert der Weg?<br>
+        2️⃣ <b>Vorher losgehen?</b> → <b>zurück</b>rechnen (Termin − Wegzeit)<br>
+        3️⃣ <b>Wie lange noch / wann fertig?</b> → <b>vor</b>rechnen (Start + Dauer)</div>` },
+    { mascot:"Schau dir mein Beispiel genau an – so machst du es dann selbst!",
+      render(body){
+        body.append(el("h2",{class:"center"},"Rechtzeitig losgehen 🚗"));
+        body.append(el("div",{class:"center",style:"font-size:1.15rem;line-height:2;margin-top:6px",
+          html:"Termin: <b>8:00 Uhr</b> 🦷<br>Fahrt: <b>1 Stunde</b> 🚗<br><br>"+
+               "8 Uhr <b>−</b> 1 Stunde = <b style='color:var(--brand-d)'>7:00 Uhr</b><br>"+
+               "👉 Du musst schon um <b>7 Uhr</b> losfahren!"}));
+      } }
+  ],
+  exercises:[
+    { type:"mc", mascot:"Denk an das Beispiel: eine Stunde vorher los!",
+      q:"🦷 Dein Termin beim Zahnarzt ist um <b>8:00 Uhr</b>. Die Fahrt dauert <b>1 Stunde</b>.<br>Wann musst du zu Hause losfahren?",
+      options: wOpt("7:00 Uhr",["9:00 Uhr","8:00 Uhr","7:30 Uhr"]),
+      explain:"8 Uhr <b>−</b> 1 Stunde = <b>7:00 Uhr</b>. Du fährst eine Stunde vorher los." },
+
+    { type:"mc",
+      q:"🏫 Die Schule beginnt um <b>8:00 Uhr</b>. Dein Schulweg dauert <b>15 Minuten</b>.<br>Wann musst du losgehen?",
+      options: wOpt("7:45 Uhr",["8:15 Uhr","7:30 Uhr","8:00 Uhr"]),
+      explain:"8:00 <b>−</b> 15 Minuten = <b>7:45 Uhr</b> (Viertel vor 8)." },
+
+    { type:"mc",
+      q:"🎂 Die Geburtstagsfeier beginnt um <b>15:00 Uhr</b> und dauert <b>2 Stunden</b>.<br>Wann ist sie zu Ende?",
+      options: wOpt("17:00 Uhr",["13:00 Uhr","16:00 Uhr","18:00 Uhr"]),
+      explain:"15 Uhr <b>+</b> 2 Stunden = <b>17:00 Uhr</b>." },
+
+    { type:"input", mascot:"Zähle die Stunden.",
+      q:"🛏️ Jetzt ist es <b>18:00 Uhr</b>. Du gehst um <b>20:00 Uhr</b> ins Bett.<br>Wie viele Stunden sind das noch?",
+      label:"Stunden", suffix:"Std", answer:2, start:0, min:0, max:12,
+      hint:"Zähle: 18 → 19 → 20.", explain:"20 <b>−</b> 18 = <b>2 Stunden</b>." },
+
+    { type:"mc",
+      q:"🍎 Die große Pause beginnt um <b>10:00 Uhr</b> und dauert <b>20 Minuten</b>.<br>Wann ist sie zu Ende?",
+      options: wOpt("10:20 Uhr",["10:02 Uhr","9:40 Uhr","10:30 Uhr"]),
+      explain:"10:00 <b>+</b> 20 Minuten = <b>10:20 Uhr</b>." },
+
+    { type:"mc", mascot:"Rückweg = zurückrechnen!",
+      q:"⚽ Du sollst um <b>18:00 Uhr</b> zu Hause sein. Der Rückweg vom Spielplatz dauert <b>15 Minuten</b>.<br>Wann musst du spätestens losgehen?",
+      options: wOpt("17:45 Uhr",["18:15 Uhr","17:30 Uhr","18:00 Uhr"]),
+      explain:"18:00 <b>−</b> 15 Minuten = <b>17:45 Uhr</b>." },
+
+    { type:"setClock", mascot:"Stelle die Uhr auf deine Los-Zeit.",
+      prompt:"🚌 Der Bus fährt um <b>16:00 Uhr</b>. Der Weg zur Haltestelle dauert <b>30 Minuten</b>.<br>Stelle die Uhr auf die Zeit, zu der du losgehst.",
+      target:{h:15,m:30}, start:{h:12,m:0}, minStep:5,
+      hint:"16:00 − 30 Minuten = 15:30 (halb 4).", explain:"Du gehst um <b>15:30 Uhr</b> los (halb 4)." },
+
+    { type:"input", mascot:"1 Stunde sind 60 Minuten.",
+      q:"📺 Ein Film dauert <b>1 Stunde und 30 Minuten</b>.<br>Wie viele Minuten sind das insgesamt?",
+      label:"Minuten", suffix:"min", answer:90, start:0, min:0, max:180, step:5,
+      hint:"60 Minuten + 30 Minuten.", explain:"60 <b>+</b> 30 = <b>90 Minuten</b>." }
+  ]
+};
+
+/* ================== STATION 10: MEISTER-CHALLENGE ====================== */
 STATION_DATA.meister={
   teach:[
     { mascot:"Du hast alles gelernt! Jetzt kommt die große <b>Meister-Prüfung</b>. Schaffst du alle Aufgaben? Ich glaube an dich! 🏆",
