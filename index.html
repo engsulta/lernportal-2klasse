@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Lernportal · 2. Klasse</title>
+<title>Lernportal · Grundschule</title>
 <link rel="stylesheet" href="shared/styles.css">
 <!-- Als App installierbar (Home-Bildschirm / Desktop) -->
 <link rel="manifest" href="manifest.webmanifest">
@@ -19,7 +19,7 @@
 
 <div id="app">
   <div class="topbar">
-    <div class="brand"><span class="logo">🎒</span><span>Lernportal · 2. Klasse</span></div>
+    <div class="brand"><span class="logo">🎒</span><span>Lernportal</span></div>
     <div class="score"><span class="star">★</span><span id="totalStars">0</span></div>
   </div>
   <div id="screen"></div>
@@ -41,61 +41,114 @@ const el=(t,a={},...kids)=>{const n=document.createElement(t);
   for(const c of kids){ if(c==null)continue; n.append(c.nodeType?c:document.createTextNode(c)); }
   return n;};
 const $=s=>document.querySelector(s);
-function updTotal(){ const e=$("#totalStars"); if(e) e.textContent=SchoolCloud.grandTotal(); }
+function updTotal(){ const e=$("#totalStars"); if(e) e.textContent=allStars(); }
+function show(wrap){ const h=$("#screen"); h.innerHTML=""; h.append(wrap); window.scrollTo(0,0); }
 
 /* =========================================================================
-   THEMEN  –  neues Fach spaeter einfach hier ergaenzen: {id,name,emoji,sub,
-   href, ready:true}. Der Fortschritt jedes Themas synct automatisch mit.
+   AUFBAU:  Klasse → Fach → Thema.
+   Neues Thema ergänzen: in das passende Fach ein {id,name,emoji,sub,href}
+   eintragen. Die id muss der Topic-id im Spielstand (SchoolCloud) entsprechen
+   und dem Ordnernamen unter topics/. Der Fortschritt synct automatisch mit.
    ========================================================================= */
-const TOPICS=[
-  { id:"uhrzeit", name:"Uhrzeit", emoji:"⏰", sub:"Die Uhr lesen & einstellen",
-    href:"topics/uhrzeit/index.html", ready:true },
-  { id:"verben-nomen", name:"Nomen & Verben", emoji:"🔎", sub:"Wörter unterscheiden",
-    href:"topics/verben-nomen/index.html", ready:true }
+const GRADES=[
+  { id:"k2", name:"2. Klasse", emoji:"2️⃣", subjects:[
+      { id:"mathe", name:"Mathematik", emoji:"🔢", topics:[
+          { id:"uhrzeit", name:"Uhrzeit", emoji:"⏰", sub:"Die Uhr lesen & einstellen", href:"topics/uhrzeit/index.html" } ]},
+      { id:"deutsch", name:"Deutsch", emoji:"📖", topics:[
+          { id:"verben-nomen", name:"Nomen & Verben", emoji:"🔎", sub:"Wörter unterscheiden", href:"topics/verben-nomen/index.html" } ]},
+      { id:"sachunterricht", name:"Sachunterricht", emoji:"🌍", topics:[] }
+  ]},
+  { id:"k3", name:"3. Klasse", emoji:"3️⃣", subjects:[
+      { id:"deutsch", name:"Deutsch", emoji:"📖", topics:[
+          { id:"lesen-verstehen", name:"Lesen & Verstehen", emoji:"📖", sub:"Texte lesen & Fragen", href:"topics/lesen-verstehen/index.html" } ]},
+      { id:"mathe", name:"Mathematik", emoji:"🔢", topics:[] },
+      { id:"sachunterricht", name:"Sachunterricht", emoji:"🌍", topics:[] }
+  ]}
 ];
 
-function renderPortal(){
+/* ---- Sterne-Summen & Zuordnung ---------------------------------------- */
+const topicStars=id=>SchoolCloud.topicTotal(id);
+const subjStars =s=>s.topics.reduce((n,t)=>n+topicStars(t.id),0);
+const gradeStars=g=>g.subjects.reduce((n,s)=>n+subjStars(s),0);
+const allStars  =()=>GRADES.reduce((n,g)=>n+gradeStars(g),0);
+function topicMeta(id){ for(const g of GRADES) for(const s of g.subjects){ const t=s.topics.find(x=>x.id===id); if(t) return {topic:t,grade:g,subject:s}; } return null; }
+
+const FOOT="margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap";
+function tile(num,emoji,name,sub,stars,onclick){
+  const card=el("div",{class:"station"});
+  if(num!=null) card.append(el("span",{class:"num"},String(num)));
+  card.append(el("span",{class:"emoji"},emoji));
+  card.append(el("div",{class:"nm"},name));
+  if(sub) card.append(el("div",{class:"muted",style:"font-size:.85rem;margin-top:2px"},sub));
+  if(stars!=null) card.append(el("div",{style:"margin-top:6px;font-weight:800;color:var(--gold)"},"★ "+stars));
+  if(onclick){ card.style.cursor="pointer"; card.addEventListener("click",onclick); }
+  return card;
+}
+
+/* ---- 1) Klassen-Auswahl (Startseite) ---------------------------------- */
+function renderGrades(){
   updTotal();
   const wrap=el("div",{class:"screen"});
-  wrap.append(el("h1",{class:"hub-title"},"🎒 Lernportal · 2. Klasse"));
-  wrap.append(el("div",{class:"hub-sub"},"Wähle ein Thema zum Üben!"));
-
+  wrap.append(el("h1",{class:"hub-title"},"🎒 Lernportal"));
+  wrap.append(el("div",{class:"hub-sub"},"Wähle deine Klasse!"));
   const grid=el("div",{class:"stations"});
-  TOPICS.forEach((t,i)=>{
-    const stars=SchoolCloud.topicTotal(t.id);
-    const card=el("div",{class:"station"+(t.ready?"":" locked")});
-    card.append(el("span",{class:"num"},String(i+1)));
-    card.append(el("span",{class:"emoji"},t.emoji));
-    card.append(el("div",{class:"nm"},t.name));
-    if(t.sub) card.append(el("div",{class:"muted",style:"font-size:.85rem;margin-top:2px"},t.sub));
-    if(t.ready){
-      card.append(el("div",{style:"margin-top:6px;font-weight:800;color:var(--gold)"},"★ "+stars));
-      card.addEventListener("click",()=>{ location.href=t.href; });
-    }
-    grid.append(card);
-  });
-
-  // Platzhalter, damit klar ist: hier kommen spaeter weitere Faecher dazu
-  const soon=el("div",{class:"station locked"});
-  soon.append(el("span",{class:"emoji"},"➕"));
-  soon.append(el("div",{class:"nm"},"Weitere Themen folgen"));
-  soon.append(el("div",{class:"muted",style:"font-size:.82rem;margin-top:4px"},"z. B. Rechnen, Einmaleins …"));
-  grid.append(soon);
-
+  GRADES.forEach((g,i)=> grid.append(tile(i+1, g.emoji, g.name, null, gradeStars(g), ()=>renderSubjects(g))));
   wrap.append(grid);
 
-  const foot=el("div",{class:"center",style:"margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  const foot=el("div",{class:"center",style:FOOT});
   foot.append(el("button",{class:"btn blue",onclick:()=>renderReport()},"📊 Elternbericht"));
   foot.append(el("button",{class:"btn gray",onclick:()=>{
-      if(confirm("Wirklich den Fortschritt in ALLEN Themen zurücksetzen?")){ SchoolCloud.resetAll(); renderPortal(); }
+      if(confirm("Wirklich den Fortschritt in ALLEN Klassen zurücksetzen?")){ SchoolCloud.resetAll(); renderGrades(); }
     }},"↺ Alles zurücksetzen"));
   if(SchoolCloud.ready()){
-    foot.append(el("button",{class:"btn gray",onclick:()=>SchoolCloud.showCodeScreen(false,renderPortal)},
+    foot.append(el("button",{class:"btn gray",onclick:()=>SchoolCloud.showCodeScreen(false,renderGrades)},
       "☁️ Code: "+(SchoolCloud.code()||"—")));
   }
   wrap.append(foot);
+  show(wrap);
+}
 
-  const host=$("#screen"); host.innerHTML=""; host.append(wrap); window.scrollTo(0,0);
+/* ---- 2) Fächer einer Klasse ------------------------------------------- */
+function renderSubjects(g){
+  updTotal();
+  const wrap=el("div",{class:"screen"});
+  wrap.append(el("h1",{class:"hub-title"}, g.emoji+" "+g.name));
+  wrap.append(el("div",{class:"hub-sub"},"Wähle ein Fach!"));
+  const grid=el("div",{class:"stations"});
+  g.subjects.forEach((s,i)=>{
+    const cnt=s.topics.length;
+    const sub = cnt ? (cnt+" Thema"+(cnt>1?"n":"")) : "bald mehr";
+    grid.append(tile(i+1, s.emoji, s.name, sub, subjStars(s), ()=>renderTopics(g,s)));
+  });
+  wrap.append(grid);
+  const foot=el("div",{class:"center",style:FOOT});
+  foot.append(el("button",{class:"btn gray",onclick:()=>renderGrades()},"← Klassen"));
+  wrap.append(foot);
+  show(wrap);
+}
+
+/* ---- 3) Themen eines Fachs -------------------------------------------- */
+function renderTopics(g,s){
+  updTotal();
+  const wrap=el("div",{class:"screen"});
+  wrap.append(el("h1",{class:"hub-title"}, s.emoji+" "+s.name));
+  wrap.append(el("div",{class:"hub-sub"}, g.name));
+  if(s.topics.length===0){
+    const card=el("div",{class:"card center",style:"padding:26px 12px"});
+    card.append(el("div",{style:"font-size:2.6rem"},"🚧"));
+    card.append(el("div",{class:"big",style:"margin-top:6px"},"Noch keine Übungen"));
+    card.append(el("div",{class:"muted",style:"margin-top:4px"},
+      "Für "+s.name+" in der "+g.name+" gibt es bald Übungen. Schau später wieder vorbei!"));
+    wrap.append(card);
+  } else {
+    const grid=el("div",{class:"stations"});
+    s.topics.forEach((t,i)=> grid.append(tile(i+1, t.emoji, t.name, t.sub, topicStars(t.id), ()=>{ location.href=t.href; })));
+    wrap.append(grid);
+  }
+  const foot=el("div",{class:"center",style:FOOT});
+  foot.append(el("button",{class:"btn gray",onclick:()=>renderSubjects(g)},"← Fächer"));
+  wrap.append(foot);
+  show(wrap);
 }
 
 /* =========================================================================
@@ -103,30 +156,32 @@ function renderPortal(){
    ========================================================================= */
 function renderReport(){
   const stats=SchoolCloud.getStats();
-  const topicName=id=>{ const t=TOPICS.find(x=>x.id===id); return t?t.name:id; };
+  const isActive=e=>(e.wrong||0)>0 && (e.lastAt||0)>(e.clearedAt||0);   // offen = Fehler & seit dem letzten Üben nicht gelöst
   const wrap=el("div",{class:"screen"});
   wrap.append(el("h1",{class:"hub-title"},"📊 Elternbericht"));
-  wrap.append(el("div",{class:"hub-sub"},"Wo passieren die meisten Fehler?"));
+  wrap.append(el("div",{class:"hub-sub"},"Wo passieren die meisten Fehler? – nach Klasse & Fach"));
 
   const card=el("div",{class:"card"});
-  const topicIds=Object.keys(stats);
   let totalWrong=0, openCount=0, anyActive=false;
-  const isActive=e=>(e.wrong||0)>0 && (e.lastAt||0)>(e.clearedAt||0);   // offen = Fehler & seit dem letzten Üben nicht gelöst
 
-  topicIds.forEach(tid=>{
-    const items=Object.entries(stats[tid]||{})
+  // Nach Klasse → Fach → Thema gruppieren, mit Klasse/Fach als Tag
+  GRADES.forEach(g=> g.subjects.forEach(sub=> sub.topics.forEach(t=>{
+    const items=Object.entries(stats[t.id]||{})
       .filter(([k,e])=>isActive(e))
       .sort((a,b)=>(b[1].wrong||0)-(a[1].wrong||0));
     if(items.length===0) return;
     anyActive=true;
     const tWrong=items.reduce((s,[k,e])=>s+(e.wrong||0),0);
     totalWrong+=tWrong; openCount+=items.length;
-    card.append(el("h2",{style:"margin:16px 0 4px"}, topicName(tid),
+    card.append(el("h2",{style:"margin:16px 0 2px;font-size:1.14rem"}, t.emoji+" "+t.name,
       el("span",{class:"muted",style:"font-size:1rem;font-weight:700"}, "  · "+tWrong+" Fehler")));
+    card.append(el("div",{style:"margin:0 0 8px"},
+      el("span",{style:"display:inline-block;background:#eaf3ff;color:#2a4a6b;border-radius:999px;padding:3px 12px;font-size:.8rem;font-weight:800"},
+        g.name+" · "+sub.name)));
     items.forEach(([key,e])=>{
       const sep=key.indexOf("#"); const station=key.slice(0,sep), exi=key.slice(sep+1);
       const row=el("div",{style:"display:flex;gap:12px;align-items:center;padding:10px 6px;border-bottom:1px solid #eef2f7;border-radius:12px;cursor:pointer",
-        onclick:()=>{ location.href="topics/"+tid+"/index.html#practice="+encodeURIComponent(station+":"+exi); }});
+        onclick:()=>{ location.href=t.href+"#practice="+encodeURIComponent(station+":"+exi); }});
       row.addEventListener("mouseenter",()=>row.style.background="#f4f9ff");
       row.addEventListener("mouseleave",()=>row.style.background="");
       row.append(el("div",{style:"font-weight:900;color:var(--red-d);min-width:52px;text-align:right"}, "❌ "+(e.wrong||0)+"×"));
@@ -140,12 +195,12 @@ function renderReport(){
       row.append(el("div",{style:"font-size:1.3rem;color:var(--blue);font-weight:900"},"▶"));
       card.append(row);
     });
-  });
+  })));
 
   if(!anyActive){
     card.append(el("div",{class:"center muted",style:"padding:24px 8px"},
-      topicIds.length ? "✅ Keine offenen Fehler – alles gemeistert! Super gemacht. 🎉"
-                      : "Noch keine Daten. Sobald geübt wird, siehst du hier, welche Fragen schwerfallen."));
+      Object.keys(stats).length ? "✅ Keine offenen Fehler – alles gemeistert! Super gemacht. 🎉"
+                                : "Noch keine Daten. Sobald geübt wird, siehst du hier, welche Fragen schwerfallen."));
   } else {
     card.append(el("div",{class:"muted center",style:"margin-top:12px;font-size:.9rem"},
       "👉 Tippe auf eine Frage, um sie noch einmal zu üben. Richtig gelöst = verschwindet aus der Liste."));
@@ -158,19 +213,19 @@ function renderReport(){
   }
 
   const foot=el("div",{class:"center",style:"margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
-  foot.append(el("button",{class:"btn green",onclick:()=>renderPortal()},"← Zurück"));
+  foot.append(el("button",{class:"btn green",onclick:()=>renderGrades()},"← Zurück"));
   foot.append(el("button",{class:"btn gray",onclick:()=>{
       if(confirm("Fehler-Bericht zurücksetzen? (Der Spielstand mit den Sternen bleibt erhalten.)")){ SchoolCloud.resetStats(); renderReport(); }
     }},"🧹 Bericht leeren"));
   wrap.append(foot);
 
-  const host=$("#screen"); host.innerHTML=""; host.append(wrap); window.scrollTo(0,0);
+  show(wrap);
 }
 
 /* Start: gemeinsamen Spielstand laden/synchronisieren, dann Portal (oder Bericht) zeigen */
 function portalHome(){
   if(location.hash==="#report"){ history.replaceState(null,"",location.pathname); renderReport(); }
-  else renderPortal();
+  else renderGrades();
 }
 SchoolCloud.bootSync(portalHome);
 

@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Lese-Detektiv 📖 – Lesen & Verstehen</title>
+<link rel="stylesheet" href="../../shared/styles.css">
+<link rel="manifest" href="../../manifest.webmanifest">
+<meta name="theme-color" content="#7ec8ff">
+<link rel="apple-touch-icon" href="../../icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Lernportal">
+<style>
+.emoji-mascot{display:flex;align-items:center;justify-content:center;font-size:60px;
+  background:#eef4ff;border-radius:50%;box-shadow:var(--shadow-s)}
+.passage{font-size:1.08rem;line-height:1.75;text-align:left;color:var(--ink)}
+.passage h3{margin:.1em 0 .4em;color:var(--brand-d)}
+.readtoggle{margin:0 0 10px}
+.mchip{display:inline-flex;align-items:center;gap:6px;background:#fff;border:2px solid var(--sky-1);
+  border-radius:14px;padding:10px 16px;font-weight:700;font-size:1.03rem;cursor:pointer;
+  box-shadow:var(--shadow-s);transition:transform .1s}
+.mchip:active{transform:scale(.96)}
+.mchip.on{border-color:var(--green);background:#e6faf0}
+.mchip .box{width:20px;height:20px;border-radius:6px;border:2px solid var(--sky-1);display:inline-block;text-align:center;line-height:18px}
+.mchip.on .box{background:var(--green);border-color:var(--green);color:#fff}
+.mgrid{display:flex;flex-direction:column;gap:10px;align-items:stretch;max-width:420px;margin:0 auto}
+</style>
+</head>
+<body>
+<canvas id="confetti"></canvas>
+
+<div id="app">
+  <div class="topbar">
+    <div class="brand"><span class="logo">📖</span><span>Lese-Detektiv</span></div>
+    <div class="score"><span class="star">★</span><span id="totalStars">0</span></div>
+    <button class="iconbtn" id="soundBtn" title="Ton an/aus">🔊</button>
+  </div>
+  <div id="screen"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="../../shared/config.js"></script>
+<script src="../../shared/cloud.js"></script>
+<script>
+"use strict";
+
+/* ---- kleine Helfer ------------------------------------------------------ */
+const $  = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
+function el(tag, attrs={}, ...kids){
+  const n=document.createElement(tag);
+  for(const k in attrs){
+    if(k==="class") n.className=attrs[k];
+    else if(k==="html") n.innerHTML=attrs[k];
+    else if(k.startsWith("on")&&typeof attrs[k]==="function") n.addEventListener(k.slice(2),attrs[k]);
+    else if(attrs[k]!=null) n.setAttribute(k,attrs[k]);
+  }
+  for(const c of kids){ if(c==null) continue; n.append(c.nodeType?c:document.createTextNode(c)); }
+  return n;
+}
+const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=rnd(0,i);[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+/* ---- Ton (WebAudio) ---------------------------------------------------- */
+const Sound=(()=>{
+  let ctx=null, on=true;
+  function ac(){ if(!ctx) ctx=new (window.AudioContext||window.webkitAudioContext)();
+    if(ctx.state==="suspended"){ ctx.resume(); } return ctx; }
+  ["pointerdown","touchstart","keydown","click"].forEach(ev=>
+    window.addEventListener(ev,()=>{ try{ ac(); }catch(e){} },{passive:true}));
+  function tone(f,t,dur,type="sine",vol=.18){
+    if(!on) return; const c=ac(); const o=c.createOscillator(),g=c.createGain();
+    o.type=type;o.frequency.setValueAtTime(f,t);o.connect(g);g.connect(c.destination);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.01);
+    g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.start(t);o.stop(t+dur);
+  }
+  return {
+    set(v){on=v;}, get(){return on;},
+    click(){if(!on)return;const t=ac().currentTime;tone(440,t,.07,"triangle",.12);},
+    good(){if(!on)return;const t=ac().currentTime;[523,659,784].forEach((f,i)=>tone(f,t+i*.09,.18,"sine",.16));},
+    wrong(){if(!on)return;const t=ac().currentTime;tone(280,t,.18,"sawtooth",.1);tone(200,t+.12,.22,"sawtooth",.1);},
+    win(){if(!on)return;const t=ac().currentTime;[523,587,659,784,880,1046].forEach((f,i)=>tone(f,t+i*.12,.3,"triangle",.16));}
+  };
+})();
+
+/* ---- Konfetti ---------------------------------------------------------- */
+const Confetti=(()=>{
+  const cv=$("#confetti"),cx=cv.getContext("2d");let parts=[],raf=null;
+  function size(){cv.width=innerWidth;cv.height=innerHeight;}
+  addEventListener("resize",size);
+  const COL=["#ff7a59","#ffd23f","#36c98d","#3aa0ff","#9b6bff","#ff79c6"];
+  function burst(n=160){
+    size();cv.style.display="block";
+    for(let i=0;i<n;i++)parts.push({x:innerWidth/2+rnd(-60,60),y:innerHeight/3,
+      vx:rnd(-90,90)/10,vy:rnd(-150,-40)/10,g:.18+Math.random()*.12,
+      s:rnd(6,13),c:pick(COL),r:Math.random()*6,vr:(Math.random()-.5)*.5,life:rnd(80,140)});
+    if(!raf)loop();
+  }
+  function loop(){
+    cx.clearRect(0,0,cv.width,cv.height);
+    parts.forEach(p=>{p.vy+=p.g;p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;p.life--;
+      cx.save();cx.translate(p.x,p.y);cx.rotate(p.r);cx.fillStyle=p.c;
+      cx.fillRect(-p.s/2,-p.s/2,p.s,p.s*.6);cx.restore();});
+    parts=parts.filter(p=>p.life>0&&p.y<cv.height+30);
+    if(parts.length)raf=requestAnimationFrame(loop);
+    else{raf=null;cv.style.display="none";}
+  }
+  return {burst};
+})();
+
+const toast=SchoolCloud.toast;
+
+/* ---- Speicher: gemeinsamer Cloud-/Fortschritt-Store -------------------- */
+const Store = SchoolCloud.store("lesen-verstehen");
+const Cloud = { ready: SchoolCloud.ready };
+function renderCodeScreen(firstRun){ SchoolCloud.showCodeScreen(firstRun, routeStart); }
+
+/* ---- Maskottchen: "Lese-Eule Lotta" ----------------------------------- */
+function mascotRow(text,mood="happy"){
+  const row=el("div",{class:"mascot-row"});
+  const face = mood==="cheer"?"🦉🎉":mood==="think"?"🦉🔍":"🦉";
+  row.append(el("div",{class:"mascot emoji-mascot"},face));
+  row.append(el("div",{class:"bubble",html:text}));
+  return row;
+}
+
+/* ---- Bildschirm-Helfer ------------------------------------------------- */
+function setScreen(node){const s=$("#screen");s.innerHTML="";s.append(node);window.scrollTo(0,0);}
+function updTotal(){const e=$("#totalStars");if(e)e.textContent=Store.total();}
+
+/* ---- Ausklappbarer Text (zum Nachlesen bei den Fragen) ----------------- */
+function readToggle(stationId){
+  const st=STATION_DATA[stationId];
+  const wrap=el("div",{class:"readtoggle center"});
+  if(!st||!st.text) return wrap;
+  const btn=el("button",{class:"btn blue",style:"font-size:1rem;padding:8px 16px"},"📖 Text nachlesen");
+  const box=el("div",{class:"card passage",style:"display:none;margin-top:8px",html:st.text});
+  btn.addEventListener("click",()=>{Sound.click();
+    const show=box.style.display==="none";
+    box.style.display=show?"block":"none";
+    btn.textContent=show?"📖 Text zuklappen":"📖 Text nachlesen";
+  });
+  wrap.append(btn,box);
+  return wrap;
+}
+
+/* =========================================================================
+   STATIONEN  (jede Station = ein Lesetext mit Fragen)
+   ========================================================================= */
+const STATIONS=[
+  {id:"igel",         n:"Der Igel", e:"🦔", c:"--brand"},
+  {id:"eichhoernchen",n:"Das Eichhörnchen", e:"🐿️", c:"--green"},
+  {id:"biene",        n:"Die Biene", e:"🐝", c:"--yellow"},
+  {id:"marienkaefer", n:"Der Marienkäfer", e:"🐞", c:"--red"},
+  {id:"regenwurm",    n:"Der Regenwurm", e:"🪱", c:"--pink"},
+  {id:"frosch",       n:"Der Frosch", e:"🐸", c:"--green"},
+  {id:"fledermaus",   n:"Die Fledermaus", e:"🦇", c:"--purple"},
+  {id:"ameise",       n:"Die Ameise", e:"🐜", c:"--brand"},
+  {id:"maulwurf",     n:"Der Maulwurf", e:"🦫", c:"--blue"},
+  {id:"schnecke",     n:"Die Schnecke", e:"🐌", c:"--green"},
+  {id:"specht",       n:"Der Specht", e:"🪶", c:"--red"},
+  {id:"meister",      n:"Lese-Meister", e:"🏆", c:"--gold", master:true}
+];
+
+/* ---- Stationskarte ----------------------------------------------------- */
+function renderHub(){
+  updTotal();
+  const wrap=el("div",{class:"screen"});
+  wrap.append(el("h1",{class:"hub-title"},"📖 Lese-Detektiv"));
+  wrap.append(el("div",{class:"hub-sub"},"Lies den Text und beantworte die Fragen!"));
+  wrap.append(mascotRow("Hallo! Ich bin <b>Lotta die Lese-Eule</b> 🦉. Zusammen lesen wir spannende Texte und finden die Antworten wie echte Detektive! 🔍"));
+
+  const prog=Store.getProgress();
+  if(prog && STATION_DATA[prog.id]){
+    const ps=STATIONS.find(x=>x.id===prog.id);
+    const cont=el("div",{class:"center",style:"margin:2px 0 12px"});
+    cont.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();startStation(prog.id,prog);}},
+      "▶ Weitermachen: "+(ps?ps.n:"")+" – Aufgabe "+((prog.i||0)+1)));
+    wrap.append(cont);
+  }
+
+  const grid=el("div",{class:"stations"});
+  let prevDone=true;
+  STATIONS.forEach((s,i)=>{
+    const stars=Store.stars(s.id), done=Store.data.done[s.id];
+    const locked = !prevDone && !done;
+    const card=el("div",{class:"station"+(s.master?" master":"")+(done?" done":"")+(locked?" locked":"")});
+    card.style.borderColor = done? "var(--gold)":"transparent";
+    card.append(el("span",{class:"num"},String(i+1)));
+    card.append(el("span",{class:"emoji"},s.e));
+    card.append(el("div",{class:"nm"},s.n));
+    const sd=el("div",{class:"stars"});
+    for(let k=0;k<3;k++)sd.append(el("span",{class:"s"+(k<stars?" on":"")},"★"));
+    card.append(sd);
+    if(!locked) card.addEventListener("click",()=>{Sound.click();startStation(s.id);});
+    grid.append(card);
+    prevDone = done;
+  });
+  wrap.append(grid);
+
+  const foot=el("div",{class:"center",style:"margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  foot.append(el("button",{class:"btn gray",onclick:()=>{location.href="../../index.html";}},"← Themen"));
+  foot.append(el("button",{class:"btn gray",onclick:()=>{
+      if(confirm("Fortschritt in diesem Thema zurücksetzen?")){Store.reset();renderHub();}
+    }},"↺ Neu starten"));
+  if(Cloud.ready()){
+    foot.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();renderCodeScreen(false);}},
+      "☁️ Code: "+(SchoolCloud.code()||"—")));
+  }
+  wrap.append(foot);
+  setScreen(wrap);
+}
+
+function stationHeader(id,step){
+  const s=STATIONS.find(x=>x.id===id);
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",
+    onclick:()=>{Sound.click();renderHub();}},"← Karte"));
+  bar.append(el("div",{class:"brand"},el("span",{},s.e+" "+s.n)));
+  bar.append(el("div",{class:"steplabel"},step||""));
+  return bar;
+}
+
+/* ---- Station-Ablauf: Text lesen -> Fragen ------------------------------ */
+function startStation(id,resume){
+  const data=STATION_DATA[id];
+  if(!data){toast("Diese Station wird noch gebaut …");return;}
+  const teach=data.teach||[];
+  const exercises=data.exercises||[];
+  let ti=0;
+  if(resume){ runExercises(id,exercises,resume); return; }
+  if(teach.length) showTeach(); else runExercises(id,exercises);
+
+  function showTeach(){
+    const card=teach[ti];
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id,"Lesen "+(ti+1)+"/"+teach.length));
+    const body=el("div",{class:"card"});
+    if(card.render){ card.render(body); }
+    else {
+      if(card.title) body.append(el("h2",{class:"center"},card.title));
+      if(card.html)  body.append(el("div",{class:"passage",html:card.html}));
+    }
+    scr.append(card.mascot? mascotRow(card.mascot,card.mood||"happy"):document.createTextNode(""));
+    scr.append(body);
+    const nav=el("div",{class:"center",style:"margin-top:8px"});
+    nav.append(el("button",{class:"btn lg green",onclick:()=>{
+      Sound.click(); ti++;
+      if(ti<teach.length) showTeach(); else runExercises(id,exercises);
+    }}, ti<teach.length-1?"Weiter →":"Los, Fragen! 🔍"));
+    scr.append(nav);
+    setScreen(scr);
+  }
+}
+
+/* ---- Übungs-Engine ----------------------------------------------------- */
+function runExercises(id,list,resume){
+  let i=resume && resume.i<list.length ? resume.i : 0,
+      wrongTotal=resume ? resume.wrongTotal||0 : 0;
+  const stName=()=>(STATIONS.find(s=>s.id===id)||{}).n;
+  const exLbl=()=>list[i] ? (list[i].q||("Frage "+(i+1))) : "";
+  const logWrong=()=>Store.recordWrong(id,i,exLbl(),stName());
+  next();
+
+  function next(){
+    if(i>=list.length){ return finish(); }
+    Store.saveProgress({id, i, wrongTotal});
+    const ex=list[i];
+    Store.recordSeen(id,i,exLbl(),stName());
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id));
+    const pr=el("div",{class:"card"});
+    const bar=el("div",{class:"progress"});const fill=el("i");bar.append(fill);
+    pr.append(bar);
+    fill.style.width=(i/list.length*100)+"%";
+    pr.append(el("div",{class:"steplabel"},"Frage "+(i+1)+" von "+list.length));
+    scr.append(pr);
+    scr.append(readToggle(id));                 // Text zum Nachlesen
+
+    const host=el("div",{class:"card"});
+    scr.append(host);
+    const fb=el("div",{class:"feedback"});scr.append(fb);
+    setScreen(scr);
+
+    const api={
+      done:(ok)=>{ if(ok){ fill.style.width=((i+1)/list.length*100)+"%"; }
+        afterAnswer(ok,ex,fb,()=>{ i++; next(); }); },
+      wrong:()=>{ wrongTotal++; logWrong(); }
+    };
+    renderExercise(ex,host,api);
+  }
+
+  function afterAnswer(ok,ex,fb,cont){
+    fb.className="feedback show "+(ok?"ok":"no");
+    fb.innerHTML="";
+    fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+    const msg=el("div");
+    msg.innerHTML = ok ? pick(["Super gelesen!","Richtig! ⭐","Klasse!","Genau!","Toll gemacht!"])
+                       : (ex.explain||"Lies den Text noch einmal genau.");
+    fb.append(msg);
+    if(ok)Sound.good(); else Sound.wrong();
+    if(ok){
+      fb.append(el("button",{class:"btn green",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");cont();}},"Weiter →"));
+    }else{
+      fb.append(el("button",{class:"btn blue",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");retry();}},"Nochmal →"));
+    }
+    function retry(){
+      const host=fb.previousSibling;
+      host.innerHTML=""; renderExercise(ex,host,{
+        done:(ok2)=>{ afterAnswer(ok2,ex,fb,()=>{i++;next();}); },
+        wrong:()=>{wrongTotal++; logWrong();}
+      });
+    }
+  }
+
+  function finish(){
+    Store.clearProgress();
+    let stars = wrongTotal===0?3 : (wrongTotal<=2?2:1);
+    Store.setStars(id,stars); updTotal();
+    const isMaster = id==="meister";
+    const scr=el("div",{class:"result screen"});
+    scr.append(stationHeader(id,"Geschafft!"));
+    const card=el("div",{class:"card center"});
+    card.append(el("div",{class:"huge"}, isMaster?"🏆 LESE-MEISTER! 🏆":"Geschafft! 🎉"));
+    const st=el("div",{class:"bigstars"});
+    for(let k=0;k<3;k++)st.append(el("span",{class:"s"},"★"));
+    card.append(st);
+    card.append(el("p",{class:"big"}, stars===3?"Perfekt – alles verstanden!":stars===2?"Sehr gut gelesen!":"Geschafft – Übung macht den Meister!"));
+    if(isMaster){
+      card.append(el("div",{class:"badge"},"🏅"));
+      card.append(el("p",{html:"Du bist ein echter <b>Lese-Detektiv</b>! Du liest genau und findest die Antworten."}));
+    }
+    const nav=el("div",{style:"margin-top:10px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+    nav.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();renderHub();}},"🗺️ Zur Karte"));
+    nav.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();startStation(id);}},"↻ Nochmal"));
+    const idx=STATIONS.findIndex(s=>s.id===id);
+    if(idx<STATIONS.length-1){
+      nav.append(el("button",{class:"btn",onclick:()=>{Sound.click();startStation(STATIONS[idx+1].id);}},"Nächster Text →"));
+    }
+    card.append(nav);
+    scr.append(card);
+    setScreen(scr);
+    setTimeout(()=>{ const ss=$$(".bigstars .s");
+      for(let k=0;k<stars;k++)setTimeout(()=>{ss[k].classList.add("on");Sound.good();},k*350);
+    },200);
+    if(stars>=3||isMaster){Confetti.burst(isMaster?240:160);Sound.win();}
+    else if(stars===2){Confetti.burst(90);Sound.good();}
+  }
+}
+
+/* =========================================================================
+   ÜBUNGS-RENDERER  (mc, tf, multi)
+   ========================================================================= */
+function renderExercise(ex,host,api){ (RENDER[ex.type]||RENDER.mc)(ex,host,api); }
+const RENDER={};
+
+RENDER.mc=(ex,host,api)=>{
+  host.append(el("div",{class:"center big",style:"margin-bottom:10px",html:ex.q}));
+  const box=el("div",{class:"center",style:"display:flex;flex-direction:column;gap:10px;align-items:center"});
+  shuffle(ex.options).forEach(o=>{
+    const b=el("button",{class:"btn lg",html:o.label,onclick:()=>{
+      if(o.ok){ b.classList.add("green"); Sound.click(); api.done(true); }
+      else{ b.classList.add("gray"); b.setAttribute("disabled",""); Sound.wrong(); api.wrong(); api.done(false); }
+    }});
+    box.append(b);
+  });
+  host.append(box);
+};
+
+RENDER.tf=(ex,host,api)=>{
+  host.append(el("div",{class:"center big",style:"margin-bottom:12px",html:ex.q}));
+  const box=el("div",{class:"center",style:"display:flex;gap:12px;justify-content:center"});
+  [["👍 Richtig",true],["👎 Falsch",false]].forEach(([lab,val])=>{
+    box.append(el("button",{class:"btn lg "+(val?"green":"blue"),html:lab,onclick:()=>{
+      const ok=(val===ex.answer); Sound.click(); if(!ok)api.wrong(); api.done(ok);
+    }}));
+  });
+  host.append(box);
+};
+
+RENDER.multi=(ex,host,api)=>{
+  host.append(el("div",{class:"center big",style:"margin-bottom:4px",html:ex.q}));
+  host.append(el("div",{class:"center muted",style:"margin-bottom:10px;font-size:.95rem"},"Kreuze alle richtigen an:"));
+  const chosen=new Set();
+  const grid=el("div",{class:"mgrid"});
+  ex.options.forEach((o,idx)=>{
+    const chip=el("div",{class:"mchip"});
+    const box=el("span",{class:"box"},"");
+    chip.append(box, el("span",{html:o.label}));
+    chip.addEventListener("click",()=>{ Sound.click();
+      if(chosen.has(idx)){chosen.delete(idx);chip.classList.remove("on");box.textContent="";}
+      else{chosen.add(idx);chip.classList.add("on");box.textContent="✓";}
+    });
+    grid.append(chip);
+  });
+  host.append(grid);
+  host.append(el("div",{class:"center",style:"margin-top:14px"},
+    el("button",{class:"btn green lg",onclick:()=>{
+      const ok = ex.options.every((o,idx)=> (!!o.ok)===chosen.has(idx));
+      if(ok) api.done(true); else { api.wrong(); toast("Noch nicht ganz – schau nochmal genau!"); api.done(false); }
+    }},"✓ Fertig")));
+};
+
+/* =========================================================================
+   INHALTE  (eigene, kindgerechte Sachtexte für die 3. Klasse + Fragen)
+   ========================================================================= */
+const STATION_DATA={};
+function readingStation(text, exercises){
+  return { text, teach:[{ mascot:"Lies den Text in Ruhe durch. Beim Beantworten kannst du ihn jederzeit nachlesen. 🔍",
+    render(b){ b.append(el("div",{class:"passage",html:text})); } }], exercises };
+}
+
+STATION_DATA.igel = readingStation(
+  `<h3>Der Igel</h3>Der Igel hat einen Rücken voller spitzer Stacheln. Damit schützt er sich gut vor Feinden:
+   Bei Gefahr rollt er sich zu einer stacheligen Kugel zusammen. Igel sind nachtaktiv. Das bedeutet, am Tag
+   schlafen sie, und in der Nacht suchen sie ihr Futter. Am liebsten fressen sie Käfer, Würmer und Schnecken.
+   Wenn es kalt wird, hält der Igel einen langen Winterschlaf. Dafür baut er sich ein warmes Nest aus Blättern.`,
+  [
+    { type:"mc", q:"Was macht der Igel bei Gefahr?",
+      options:[{label:"Er rollt sich zu einer Kugel zusammen",ok:true},{label:"Er rennt schnell weg",ok:false},{label:"Er fliegt davon",ok:false}],
+      explain:"Im Text steht: Bei Gefahr <b>rollt er sich zu einer Kugel zusammen</b>." },
+    { type:"mc", q:"Wann sucht der Igel sein Futter?",
+      options:[{label:"In der Nacht",ok:true},{label:"Am Morgen",ok:false},{label:"Am Mittag",ok:false}],
+      explain:"Igel sind <b>nachtaktiv</b> – sie suchen ihr Futter in der Nacht." },
+    { type:"multi", q:"Was frisst der Igel am liebsten?",
+      options:[{label:"Käfer",ok:true},{label:"Würmer",ok:true},{label:"Schnecken",ok:true},{label:"Gras",ok:false}],
+      explain:"Der Igel frisst <b>Käfer, Würmer und Schnecken</b> – aber kein Gras." },
+    { type:"tf", q:"Der Igel hält im Winter einen Winterschlaf.", answer:true,
+      explain:"Richtig – wenn es kalt wird, hält der Igel einen <b>langen Winterschlaf</b>." }
+  ]
+);
+
+STATION_DATA.eichhoernchen = readingStation(
+  `<h3>Das Eichhörnchen</h3>Das Eichhörnchen hat ein rotbraunes Fell und einen großen, buschigen Schwanz.
+   Mit dem Schwanz hält es beim Klettern das Gleichgewicht. Eichhörnchen leben in Bäumen und springen flink
+   von Ast zu Ast. Im Herbst sammeln sie viele Nüsse und vergraben sie in der Erde. Im Winter graben sie ihre
+   Vorräte wieder aus. Manchmal vergessen sie ein Versteck. Dann wächst dort im Frühling ein neuer Baum.`,
+  [
+    { type:"mc", q:"Wofür braucht das Eichhörnchen seinen Schwanz?",
+      options:[{label:"Zum Gleichgewicht halten",ok:true},{label:"Zum Fressen",ok:false},{label:"Zum Schlafen",ok:false}],
+      explain:"Mit dem Schwanz hält es beim Klettern das <b>Gleichgewicht</b>." },
+    { type:"mc", q:"Was sammeln Eichhörnchen im Herbst?",
+      options:[{label:"Nüsse",ok:true},{label:"Steine",ok:false},{label:"Blumen",ok:false}],
+      explain:"Im Herbst sammeln sie viele <b>Nüsse</b> und vergraben sie." },
+    { type:"tf", q:"Aus einem vergessenen Versteck kann ein neuer Baum wachsen.", answer:true,
+      explain:"Genau – vergisst das Eichhörnchen ein Versteck, wächst dort ein neuer Baum." }
+  ]
+);
+
+STATION_DATA.biene = readingStation(
+  `<h3>Die Biene</h3>Bienen leben zusammen in einem großen Bienenstock. In einem Bienenvolk gibt es eine
+   Königin und viele fleißige Arbeiterinnen. Die Arbeiterinnen fliegen von Blüte zu Blüte und sammeln süßen
+   Nektar. Aus dem Nektar machen sie Honig. Beim Sammeln tragen die Bienen Blütenstaub von Blume zu Blume.
+   So helfen sie den Pflanzen. Ohne Bienen gäbe es viel weniger Obst.`,
+  [
+    { type:"mc", q:"Wo leben Bienen zusammen?",
+      options:[{label:"Im Bienenstock",ok:true},{label:"In einer Höhle",ok:false},{label:"Unter der Erde",ok:false}],
+      explain:"Bienen leben zusammen in einem großen <b>Bienenstock</b>." },
+    { type:"mc", q:"Was machen die Bienen aus dem Nektar?",
+      options:[{label:"Honig",ok:true},{label:"Wachs zum Bauen",ok:false},{label:"Nüsse",ok:false}],
+      explain:"Aus dem Nektar machen sie <b>Honig</b>." },
+    { type:"tf", q:"Bienen helfen den Pflanzen.", answer:true,
+      explain:"Richtig – sie tragen Blütenstaub weiter und helfen so den Pflanzen." }
+  ]
+);
+
+STATION_DATA.marienkaefer = readingStation(
+  `<h3>Der Marienkäfer</h3>Der Marienkäfer ist ein kleiner Käfer mit roten Flügeln und schwarzen Punkten.
+   Viele Menschen freuen sich, wenn sie einen sehen, denn er gilt als Glücksbringer. Im Garten ist der
+   Marienkäfer sehr nützlich. Er frisst nämlich kleine Blattläuse, die den Pflanzen schaden. Ein einziger
+   Marienkäfer kann am Tag sehr viele Blattläuse fressen.`,
+  [
+    { type:"mc", q:"Welche Farbe haben die Flügel des Marienkäfers?",
+      options:[{label:"Rot mit schwarzen Punkten",ok:true},{label:"Blau",ok:false},{label:"Grün",ok:false}],
+      explain:"Der Marienkäfer hat <b>rote Flügel mit schwarzen Punkten</b>." },
+    { type:"mc", q:"Was frisst der Marienkäfer?",
+      options:[{label:"Blattläuse",ok:true},{label:"Blätter",ok:false},{label:"Honig",ok:false}],
+      explain:"Er frisst kleine <b>Blattläuse</b>, die den Pflanzen schaden." },
+    { type:"tf", q:"Der Marienkäfer ist im Garten nützlich.", answer:true,
+      explain:"Richtig – weil er die schädlichen Blattläuse frisst." }
+  ]
+);
+
+STATION_DATA.regenwurm = readingStation(
+  `<h3>Der Regenwurm</h3>Der Regenwurm lebt in der Erde und hat keine Beine. Er gräbt lange Gänge durch den
+   Boden. Dadurch bekommt die Erde Luft und Wasser, und die Pflanzen wachsen besser. Der Regenwurm frisst
+   alte Blätter und Reste im Boden. Bei starkem Regen kommt er oft nach oben, damit er in seinen Gängen nicht
+   ertrinkt. Daher hat er wohl seinen Namen bekommen.`,
+  [
+    { type:"mc", q:"Wo lebt der Regenwurm?",
+      options:[{label:"In der Erde",ok:true},{label:"Im Wasser",ok:false},{label:"Auf Bäumen",ok:false}],
+      explain:"Der Regenwurm lebt <b>in der Erde</b> und gräbt Gänge." },
+    { type:"mc", q:"Warum ist der Regenwurm nützlich?",
+      options:[{label:"Er lockert die Erde und bringt Luft hinein",ok:true},{label:"Er frisst Blattläuse",ok:false},{label:"Er macht Honig",ok:false}],
+      explain:"Durch seine Gänge bekommt die Erde <b>Luft und Wasser</b>." },
+    { type:"tf", q:"Der Regenwurm hat viele Beine.", answer:false,
+      explain:"Falsch – der Regenwurm hat <b>keine Beine</b>." }
+  ]
+);
+
+STATION_DATA.frosch = readingStation(
+  `<h3>Der Frosch</h3>Der Frosch lebt gern am Wasser. Er hat lange, kräftige Hinterbeine und kann damit weit
+   springen. Mit seiner langen, klebrigen Zunge fängt er blitzschnell Fliegen und Mücken. Frösche legen ihre
+   Eier ins Wasser. Aus den Eiern schlüpfen zuerst kleine Kaulquappen. Erst nach einiger Zeit werden aus den
+   Kaulquappen richtige Frösche.`,
+  [
+    { type:"mc", q:"Womit fängt der Frosch seine Beute?",
+      options:[{label:"Mit seiner langen Zunge",ok:true},{label:"Mit den Händen",ok:false},{label:"Mit den Zähnen",ok:false}],
+      explain:"Mit seiner <b>langen, klebrigen Zunge</b> fängt er Fliegen und Mücken." },
+    { type:"mc", q:"Was schlüpft zuerst aus den Fröscheiern?",
+      options:[{label:"Kaulquappen",ok:true},{label:"kleine Frösche",ok:false},{label:"Fische",ok:false}],
+      explain:"Zuerst schlüpfen kleine <b>Kaulquappen</b>, später werden Frösche daraus." },
+    { type:"tf", q:"Frösche legen ihre Eier ins Wasser.", answer:true,
+      explain:"Richtig – Frösche legen ihre Eier ins Wasser." }
+  ]
+);
+
+STATION_DATA.fledermaus = readingStation(
+  `<h3>Die Fledermaus</h3>Die Fledermaus ist das einzige Säugetier, das richtig fliegen kann. Am Tag schläft
+   sie und hängt dabei kopfüber. In der Nacht fliegt sie los und jagt Insekten. Im Dunkeln sieht die Fledermaus
+   nicht besonders gut. Deshalb ruft sie feine Töne und hört das Echo. So findet sie ihren Weg und ihre Beute.
+   Im Winter halten viele Fledermäuse einen Winterschlaf.`,
+  [
+    { type:"mc", q:"Wie findet die Fledermaus im Dunkeln ihren Weg?",
+      options:[{label:"Mit feinen Tönen und dem Echo",ok:true},{label:"Mit ihren großen Augen",ok:false},{label:"Mit der Nase",ok:false}],
+      explain:"Sie ruft feine Töne und hört das <b>Echo</b> – so findet sie ihren Weg." },
+    { type:"mc", q:"Wann jagt die Fledermaus?",
+      options:[{label:"In der Nacht",ok:true},{label:"Am Morgen",ok:false},{label:"Am Mittag",ok:false}],
+      explain:"In der <b>Nacht</b> fliegt sie los und jagt Insekten." },
+    { type:"tf", q:"Die Fledermaus schläft kopfüber.", answer:true,
+      explain:"Richtig – am Tag schläft sie und hängt dabei kopfüber." }
+  ]
+);
+
+STATION_DATA.ameise = readingStation(
+  `<h3>Die Ameise</h3>Ameisen sind sehr kleine, aber erstaunlich starke Tiere. Sie leben zusammen in einem
+   großen Ameisenhaufen, in dem viele tausend Tiere wohnen. Jede Ameise hat ihre Aufgabe. Manche suchen
+   Futter, andere pflegen die Eier oder bauen am Nest. Eine Ameise kann viel mehr tragen, als sie selbst
+   wiegt. Zusammen sind die Ameisen ein starkes Team.`,
+  [
+    { type:"mc", q:"Wo leben Ameisen zusammen?",
+      options:[{label:"In einem Ameisenhaufen",ok:true},{label:"In einem Bienenstock",ok:false},{label:"In einer Baumhöhle",ok:false}],
+      explain:"Ameisen leben zusammen in einem großen <b>Ameisenhaufen</b>." },
+    { type:"mc", q:"Was ist besonders stark an einer Ameise?",
+      options:[{label:"Sie trägt mehr, als sie selbst wiegt",ok:true},{label:"Sie kann fliegen",ok:false},{label:"Sie kann schwimmen",ok:false}],
+      explain:"Eine Ameise kann viel mehr <b>tragen, als sie selbst wiegt</b>." },
+    { type:"tf", q:"Jede Ameise hat eine Aufgabe.", answer:true,
+      explain:"Richtig – manche suchen Futter, andere pflegen die Eier oder bauen." }
+  ]
+);
+
+STATION_DATA.maulwurf = readingStation(
+  `<h3>Der Maulwurf</h3>Der Maulwurf lebt tief unter der Erde. Mit seinen breiten Grabschaufeln gräbt er lange
+   Gänge durch den Boden. Die überschüssige Erde schiebt er nach oben. So entstehen die kleinen Erdhügel, die
+   man im Garten sieht. Der Maulwurf sieht fast nichts, aber er hört und riecht sehr gut. Am liebsten frisst er
+   Regenwürmer und Insekten.`,
+  [
+    { type:"mc", q:"Wo lebt der Maulwurf?",
+      options:[{label:"Tief unter der Erde",ok:true},{label:"Auf Bäumen",ok:false},{label:"Im Wasser",ok:false}],
+      explain:"Der Maulwurf lebt <b>tief unter der Erde</b>." },
+    { type:"mc", q:"Wie entstehen die kleinen Erdhügel im Garten?",
+      options:[{label:"Der Maulwurf schiebt Erde nach oben",ok:true},{label:"Der Regen macht sie",ok:false},{label:"Vögel bauen sie",ok:false}],
+      explain:"Er schiebt die überschüssige Erde nach oben – so entstehen die <b>Erdhügel</b>." },
+    { type:"tf", q:"Der Maulwurf kann sehr gut sehen.", answer:false,
+      explain:"Falsch – er <b>sieht fast nichts</b>, aber hört und riecht sehr gut." }
+  ]
+);
+
+STATION_DATA.schnecke = readingStation(
+  `<h3>Die Schnecke</h3>Die Schnecke trägt ihr Haus immer auf dem Rücken. Bei Gefahr oder wenn es zu trocken
+   ist, zieht sie sich ganz in ihr Haus zurück. Die Schnecke kriecht auf einem einzigen breiten Fuß und
+   hinterlässt dabei eine glänzende Schleimspur. Sie ist sehr langsam. Am liebsten frisst sie frische, grüne
+   Blätter. Ihre Fühler kann sie ein- und ausfahren.`,
+  [
+    { type:"mc", q:"Was trägt die Schnecke immer auf dem Rücken?",
+      options:[{label:"Ihr Haus",ok:true},{label:"Ein Blatt",ok:false},{label:"Ihre Eier",ok:false}],
+      explain:"Die Schnecke trägt ihr <b>Haus</b> immer auf dem Rücken." },
+    { type:"mc", q:"Worauf kriecht die Schnecke?",
+      options:[{label:"Auf einem einzigen Fuß",ok:true},{label:"Auf vielen kleinen Beinen",ok:false},{label:"Auf ihren Fühlern",ok:false}],
+      explain:"Sie kriecht auf einem einzigen breiten <b>Fuß</b>." },
+    { type:"tf", q:"Die Schnecke ist sehr schnell.", answer:false,
+      explain:"Falsch – die Schnecke ist <b>sehr langsam</b>." }
+  ]
+);
+
+STATION_DATA.specht = readingStation(
+  `<h3>Der Specht</h3>Der Specht ist ein Vogel, der im Wald lebt. Mit seinem starken Schnabel hämmert er gegen
+   Baumstämme. Das laute Klopfen hört man weit durch den Wald. So sucht er nach Käfern und Larven, die unter
+   der Rinde stecken. Mit seiner langen Zunge holt er sie dann heraus. Der Specht baut auch Höhlen in die
+   Bäume, in denen er wohnt und seine Jungen großzieht.`,
+  [
+    { type:"mc", q:"Womit klopft der Specht an den Baum?",
+      options:[{label:"Mit seinem starken Schnabel",ok:true},{label:"Mit den Flügeln",ok:false},{label:"Mit den Füßen",ok:false}],
+      explain:"Mit seinem starken <b>Schnabel</b> hämmert er gegen die Baumstämme." },
+    { type:"mc", q:"Was sucht der Specht unter der Rinde?",
+      options:[{label:"Käfer und Larven",ok:true},{label:"Nüsse",ok:false},{label:"Honig",ok:false}],
+      explain:"Er sucht <b>Käfer und Larven</b> unter der Rinde." },
+    { type:"tf", q:"Der Specht baut Höhlen in Bäume.", answer:true,
+      explain:"Richtig – in den Höhlen wohnt er und zieht seine Jungen groß." }
+  ]
+);
+
+/* ---- Lese-Meister: Fragen aus allen Texten (kurzer Test) --------------- */
+STATION_DATA.meister={
+  text:`<h3>Lese-Meister</h3>Hier kommen Fragen zu allen Tieren aus den Texten. Wenn du unsicher bist,
+        lies den passenden Text noch einmal nach. Viel Erfolg, Lese-Detektiv! 🔍`,
+  teach:[{ mascot:"Jetzt kommt die große <b>Lese-Meister-Prüfung</b>! Fragen zu allen Tieren. Ich glaube an dich! 🏆",
+    mood:"cheer",
+    render(b){ b.append(el("h2",{class:"center"},"🏆 Lese-Meister 🏆"));
+      b.append(el("div",{class:"center big"},"Erinnerst du dich an die Tiere? Los geht's!")); } }],
+  exercises:[
+    { type:"mc", q:"① Welches Tier rollt sich bei Gefahr zu einer Kugel zusammen?",
+      options:[{label:"Der Igel",ok:true},{label:"Der Frosch",ok:false},{label:"Die Biene",ok:false}],
+      explain:"Der <b>Igel</b> rollt sich zu einer stacheligen Kugel zusammen." },
+    { type:"mc", q:"② Welches Tier macht aus Nektar Honig?",
+      options:[{label:"Die Biene",ok:true},{label:"Die Ameise",ok:false},{label:"Der Specht",ok:false}],
+      explain:"Die <b>Biene</b> macht aus Nektar Honig." },
+    { type:"mc", q:"③ Welches Tier findet im Dunkeln seinen Weg mit dem Echo?",
+      options:[{label:"Die Fledermaus",ok:true},{label:"Der Maulwurf",ok:false},{label:"Die Schnecke",ok:false}],
+      explain:"Die <b>Fledermaus</b> ruft Töne und hört das Echo." },
+    { type:"tf", q:"④ Der Maulwurf kann sehr gut sehen.", answer:false,
+      explain:"Falsch – der Maulwurf sieht fast nichts, hört und riecht aber gut." },
+    { type:"mc", q:"⑤ Welches Tier trägt sein Haus auf dem Rücken?",
+      options:[{label:"Die Schnecke",ok:true},{label:"Der Regenwurm",ok:false},{label:"Der Marienkäfer",ok:false}],
+      explain:"Die <b>Schnecke</b> trägt ihr Haus immer auf dem Rücken." },
+    { type:"multi", q:"⑥ Welche Tiere sind im Garten nützlich?",
+      options:[{label:"Marienkäfer (frisst Blattläuse)",ok:true},{label:"Regenwurm (lockert die Erde)",ok:true},{label:"Biene (hilft den Pflanzen)",ok:true},{label:"Keins davon",ok:false}],
+      explain:"Marienkäfer, Regenwurm und Biene sind alle <b>nützlich</b> im Garten." }
+  ]
+};
+
+/* ---- Nach dem Laden zum richtigen Bildschirm --------------------------- */
+function routeStart(){
+  updTotal();
+  const r=Store.getProgress();
+  if(r && STATION_DATA[r.id]) startStation(r.id,r);
+  else renderHub();
+}
+
+/* ---- Ton-Schalter ------------------------------------------------------ */
+$("#soundBtn").addEventListener("click",function(){
+  const on=!Sound.get();Sound.set(on);this.textContent=on?"🔊":"🔇";if(on)Sound.click();
+});
+
+/* ---- Einzelne Frage aus dem Elternbericht üben ------------------------- */
+const TOPIC_ID="lesen-verstehen";
+let practiceTimer=null;
+function runPractice(stationId, exi){
+  clearTimeout(practiceTimer);
+  const data=STATION_DATA[stationId];
+  const ex = data && data.exercises && data.exercises[+exi];
+  const back=()=>{ clearTimeout(practiceTimer); location.href="../../index.html#report"; };
+  if(!ex){ back(); return; }
+  function goNext(){
+    clearTimeout(practiceTimer);
+    const open=SchoolCloud.openQuestions();
+    if(open.length===0){ back(); return; }
+    const nx=open.filter(q=>q.topic===TOPIC_ID)[0]||open[0];
+    if(nx.topic===TOPIC_ID) runPractice(nx.station, nx.exi);
+    else location.href="../"+nx.topic+"/index.html#practice="+encodeURIComponent(nx.station+":"+nx.exi);
+  }
+  const scr=el("div",{class:"screen"});
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",onclick:back},"← Bericht"));
+  bar.append(el("div",{class:"brand"},el("span",{},"🔁 Üben")));
+  const openNow=SchoolCloud.openQuestions().length;
+  bar.append(el("div",{class:"steplabel"}, openNow>1 ? ("noch "+openNow+" offen") : ((STATIONS.find(s=>s.id===stationId)||{}).n||"")));
+  scr.append(bar);
+  scr.append(mascotRow("Lies genau und finde die richtige Antwort! 🔍","think"));
+  scr.append(readToggle(stationId));
+  const host=el("div",{class:"card"}); scr.append(host);
+  const fb=el("div",{class:"feedback"}); scr.append(fb);
+  setScreen(scr);
+  render();
+  function render(){
+    host.innerHTML="";
+    renderExercise(ex, host, {
+      done:(ok)=>{
+        fb.className="feedback show "+(ok?"ok":"no"); fb.innerHTML="";
+        fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+        const msg=el("div"); msg.innerHTML = ok ? "Richtig gelesen! Klasse! ⭐" : (ex.explain||"Lies den Text noch einmal genau."); fb.append(msg);
+        if(ok){ Sound.good(); Store.clearStat(stationId, exi);
+          const more = SchoolCloud.openQuestions().length>0;
+          fb.append(el("button",{class:"btn green",style:"margin-left:auto",onclick:goNext}, more?"Weiter →":"✓ Fertig – zum Bericht"));
+          practiceTimer=setTimeout(goNext, 1500);
+        } else { Sound.wrong();
+          fb.append(el("button",{class:"btn blue",style:"margin-left:auto",onclick:()=>{fb.classList.remove("show"); render();}},"Nochmal →"));
+        }
+      },
+      wrong:()=>{}
+    });
+  }
+}
+
+/* ---- Start: ggf. Übungsmodus aus dem Bericht, sonst normaler Ablauf ----- */
+function startHere(){
+  const m=/^#practice=([^:]+):(\d+)$/.exec(decodeURIComponent(location.hash||""));
+  if(m){ history.replaceState(null,"",location.pathname); runPractice(m[1], m[2]); return; }
+  routeStart();
+}
+SchoolCloud.bootSync(startHere);
+
+/* App-Installation & Offline-Betrieb */
+if("serviceWorker" in navigator){ window.addEventListener("load",()=>navigator.serviceWorker.register("../../sw.js").catch(()=>{})); }
+
+/* dekorative Wolken */
+(function clouds(){const b=document.body;for(let i=0;i<4;i++){const c=el("div",{class:"cloud"});
+  c.style.top=(8+i*16)+"%";c.style.width=(60+rnd(0,60))+"px";c.style.height=(20+rnd(0,14))+"px";
+  c.style.animationDuration=(40+rnd(0,40))+"s";c.style.animationDelay=(-rnd(0,40))+"s";b.append(c);}})();
+</script>
+</body>
+</html>
