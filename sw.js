@@ -15,6 +15,7 @@ const PRECACHE = [
   "topics/verben-nomen/index.html",
   "topics/lesen-verstehen/index.html",
   "topics/rechnen-100/index.html",
+  "topics/einmaleins/index.html",
   "icons/icon-192.png",
   "icons/icon-512.png",
   "icons/apple-touch-icon.png"

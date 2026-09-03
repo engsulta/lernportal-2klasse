@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Rechen-Fuchs 🧮 – Rechnen bis 100</title>
+<title>Einmaleins-Löwe ✖️ – Das 1×1</title>
 <link rel="stylesheet" href="../../shared/styles.css">
 <link rel="manifest" href="../../manifest.webmanifest">
 <meta name="theme-color" content="#7ec8ff">
@@ -15,8 +15,8 @@
 <style>
 .emoji-mascot{display:flex;align-items:center;justify-content:center;font-size:60px;
   background:#eef4ff;border-radius:50%;box-shadow:var(--shadow-s)}
-.calc{font-size:2.3rem;font-weight:900;text-align:center;margin:6px 0 2px;letter-spacing:1px;color:var(--ink)}
-.calc .op{color:var(--brand-d);margin:0 6px}
+.calc{font-size:2.4rem;font-weight:900;text-align:center;margin:6px 0 2px;letter-spacing:1px;color:var(--ink)}
+.calc .op{color:var(--brand-d);margin:0 8px}
 .ansbox{display:inline-block;min-width:96px;font-size:2rem;font-weight:900;text-align:center;
   background:var(--paper-2);border:3px solid var(--sky-1);border-radius:14px;padding:6px 14px;margin:10px auto;color:var(--ink)}
 .numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:270px;margin:8px auto 0}
@@ -25,22 +25,7 @@
 .numkey:active{transform:translateY(2px)}
 .numkey.ok{background:var(--green);color:#fff}
 .numkey.del{background:#ffe6e6}
-/* Zahlenhaus */
-.haus{width:214px;margin:8px auto 0}
-.haus .roof{background:var(--brand);color:#fff;font-weight:900;font-size:1.7rem;text-align:center;
-  padding:12px;border-radius:16px 16px 0 0;clip-path:polygon(50% 0,100% 100%,0 100%);padding-top:22px}
-.haus .rooms{display:flex}
-.haus .room{flex:1;background:var(--paper-2);border:3px solid var(--brand);font-size:1.7rem;font-weight:900;
-  text-align:center;padding:18px 0;color:var(--ink)}
-.haus .room:first-child{border-right:none;border-radius:0 0 0 14px}
-.haus .room:last-child{border-radius:0 0 14px 0}
-.haus .room.q{background:#fff3d6}
-/* Zahlenmauer */
-.mauer{display:flex;flex-direction:column;align-items:center;gap:6px;margin:10px 0 2px}
-.mrow{display:flex;gap:6px;justify-content:center}
-.brick{width:66px;height:46px;display:flex;align-items:center;justify-content:center;
-  background:var(--paper-2);border:3px solid var(--blue);border-radius:10px;font-weight:900;font-size:1.35rem;color:var(--ink)}
-.brick.q{background:#fff3d6;border-color:var(--gold)}
+.reihe{font-size:1.25rem;font-weight:800;letter-spacing:1px;color:var(--brand-d);text-align:center;margin-top:8px}
 </style>
 </head>
 <body>
@@ -48,7 +33,7 @@
 
 <div id="app">
   <div class="topbar">
-    <div class="brand"><span class="logo">🧮</span><span>Rechen-Fuchs</span></div>
+    <div class="brand"><span class="logo">✖️</span><span>Einmaleins-Löwe</span></div>
     <div class="score"><span class="star">★</span><span id="totalStars">0</span></div>
     <button class="iconbtn" id="soundBtn" title="Ton an/aus">🔊</button>
   </div>
@@ -62,7 +47,6 @@
 <script>
 "use strict";
 
-/* ---- kleine Helfer ------------------------------------------------------ */
 const $  = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
 function el(tag, attrs={}, ...kids){
@@ -80,7 +64,6 @@ const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=rnd(0,i);[a[i],a[j]]=[a[j],a[i]];}return a;}
 
-/* ---- Ton --------------------------------------------------------------- */
 const Sound=(()=>{
   let ctx=null, on=true;
   function ac(){ if(!ctx) ctx=new (window.AudioContext||window.webkitAudioContext)();
@@ -102,7 +85,6 @@ const Sound=(()=>{
   };
 })();
 
-/* ---- Konfetti ---------------------------------------------------------- */
 const Confetti=(()=>{
   const cv=$("#confetti"),cx=cv.getContext("2d");let parts=[],raf=null;
   function size(){cv.width=innerWidth;cv.height=innerHeight;}
@@ -129,20 +111,17 @@ const Confetti=(()=>{
 
 const toast=SchoolCloud.toast;
 
-/* ---- Speicher ---------------------------------------------------------- */
-const Store = SchoolCloud.store("rechnen-100");
+const Store = SchoolCloud.store("einmaleins");
 const Cloud = { ready: SchoolCloud.ready };
 function renderCodeScreen(firstRun){ SchoolCloud.showCodeScreen(firstRun, routeStart); }
 
-/* ---- Maskottchen: "Rechen-Fuchs Felix" -------------------------------- */
 function mascotRow(text,mood="happy"){
   const row=el("div",{class:"mascot-row"});
-  const face = mood==="cheer"?"🦊🎉":mood==="think"?"🦊🤔":"🦊";
+  const face = mood==="cheer"?"🦁🎉":mood==="think"?"🦁🤔":"🦁";
   row.append(el("div",{class:"mascot emoji-mascot"},face));
   row.append(el("div",{class:"bubble",html:text}));
   return row;
 }
-
 function setScreen(node){const s=$("#screen");s.innerHTML="";s.append(node);window.scrollTo(0,0);}
 function updTotal(){const e=$("#totalStars");if(e)e.textContent=Store.total();}
 
@@ -150,19 +129,20 @@ function updTotal(){const e=$("#totalStars");if(e)e.textContent=Store.total();}
    STATIONEN
    ========================================================================= */
 const STATIONS=[
-  {id:"plusminus", n:"Plus & Minus bis 100", e:"➕", c:"--green"},
-  {id:"minus-uebergang", n:"Minus mit Übergang", e:"➖", c:"--red"},
-  {id:"haeuser",   n:"Zahlenhäuser",         e:"🏠", c:"--blue"},
-  {id:"mauern",    n:"Zahlenmauern",         e:"🧱", c:"--brand"},
-  {id:"meister",   n:"Rechen-Meister",       e:"🏆", c:"--gold", master:true}
+  {id:"e2",       n:"Das 2er-Einmaleins", e:"2️⃣", c:"--green"},
+  {id:"e5_10",    n:"5er & 10er",         e:"5️⃣", c:"--blue"},
+  {id:"e3",       n:"Das 3er-Einmaleins", e:"3️⃣", c:"--purple"},
+  {id:"e4",       n:"Das 4er-Einmaleins", e:"4️⃣", c:"--pink"},
+  {id:"gemischt", n:"Gemischtes 1×1",     e:"🔀", c:"--brand"},
+  {id:"meister",  n:"1×1-Meister",        e:"🏆", c:"--gold", master:true}
 ];
 
 function renderHub(){
   updTotal();
   const wrap=el("div",{class:"screen"});
-  wrap.append(el("h1",{class:"hub-title"},"🧮 Rechen-Fuchs"));
-  wrap.append(el("div",{class:"hub-sub"},"Rechnen im Zahlenraum bis 100"));
-  wrap.append(mascotRow("Hallo! Ich bin <b>Felix der Rechen-Fuchs</b> 🦊. Wir rechnen mit Zahlen bis 100, lösen Zahlenhäuser und bauen Zahlenmauern! 🧱"));
+  wrap.append(el("h1",{class:"hub-title"},"✖️ Einmaleins-Löwe"));
+  wrap.append(el("div",{class:"hub-sub"},"Übe das kleine Einmaleins (1×1)"));
+  wrap.append(mascotRow("Hallo! Ich bin <b>Leo der 1×1-Löwe</b> 🦁. Wir üben die Reihen, bis du sie im Schlaf kannst! 💪"));
 
   const prog=Store.getProgress();
   if(prog && STATION_DATA[prog.id]){
@@ -240,13 +220,12 @@ function startStation(id,resume){
     nav.append(el("button",{class:"btn lg green",onclick:()=>{
       Sound.click(); ti++;
       if(ti<teach.length) showTeach(); else runExercises(id,exercises);
-    }}, ti<teach.length-1?"Weiter →":"Los, rechnen! 🦊"));
+    }}, ti<teach.length-1?"Weiter →":"Los, üben! 🦁"));
     scr.append(nav);
     setScreen(scr);
   }
 }
 
-/* ---- Übungs-Engine ----------------------------------------------------- */
 function runExercises(id,list,resume){
   let i=resume && resume.i<list.length ? resume.i : 0,
       wrongTotal=resume ? resume.wrongTotal||0 : 0;
@@ -287,8 +266,8 @@ function runExercises(id,list,resume){
     fb.innerHTML="";
     fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
     const msg=el("div");
-    msg.innerHTML = ok ? pick(["Super gerechnet!","Richtig! ⭐","Klasse!","Genau!","Toll gemacht!"])
-                       : (ex.explain||"Rechne noch einmal genau nach.");
+    msg.innerHTML = ok ? pick(["Super!","Richtig! ⭐","Klasse!","Genau!","Stark gerechnet!"])
+                       : (ex.explain||"Denk an die Reihe und probiere nochmal.");
     fb.append(msg);
     if(ok)Sound.good(); else Sound.wrong();
     if(ok){
@@ -315,21 +294,21 @@ function runExercises(id,list,resume){
     const scr=el("div",{class:"result screen"});
     scr.append(stationHeader(id,"Geschafft!"));
     const card=el("div",{class:"card center"});
-    card.append(el("div",{class:"huge"}, isMaster?"🏆 RECHEN-MEISTER! 🏆":"Geschafft! 🎉"));
+    card.append(el("div",{class:"huge"}, isMaster?"🏆 1×1-MEISTER! 🏆":"Geschafft! 🎉"));
     const st=el("div",{class:"bigstars"});
     for(let k=0;k<3;k++)st.append(el("span",{class:"s"},"★"));
     card.append(st);
-    card.append(el("p",{class:"big"}, stars===3?"Perfekt – alles richtig gerechnet!":stars===2?"Sehr gut gerechnet!":"Geschafft – Übung macht den Meister!"));
+    card.append(el("p",{class:"big"}, stars===3?"Perfekt – alles richtig!":stars===2?"Sehr gut gerechnet!":"Geschafft – Übung macht den Meister!"));
     if(isMaster){
       card.append(el("div",{class:"badge"},"🏅"));
-      card.append(el("p",{html:"Du bist ein echter <b>Rechen-Meister</b>! Plus, Minus, Zahlenhäuser und Zahlenmauern – alles kein Problem."}));
+      card.append(el("p",{html:"Du bist ein echter <b>1×1-Meister</b>! Alle Reihen sitzen. 🦁"}));
     }
     const nav=el("div",{style:"margin-top:10px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
     nav.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();renderHub();}},"🗺️ Zur Karte"));
     nav.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();startStation(id);}},"↻ Nochmal"));
     const idx=STATIONS.findIndex(s=>s.id===id);
     if(idx<STATIONS.length-1){
-      nav.append(el("button",{class:"btn",onclick:()=>{Sound.click();startStation(STATIONS[idx+1].id);}},"Nächste Station →"));
+      nav.append(el("button",{class:"btn",onclick:()=>{Sound.click();startStation(STATIONS[idx+1].id);}},"Nächste Reihe →"));
     }
     card.append(nav);
     scr.append(card);
@@ -343,12 +322,11 @@ function runExercises(id,list,resume){
 }
 
 /* =========================================================================
-   ÜBUNGS-RENDERER
+   RENDERER  (calc mit Ziffernblock)
    ========================================================================= */
 function renderExercise(ex,host,api){ (RENDER[ex.type]||RENDER.calc)(ex,host,api); }
 const RENDER={};
 
-/* gemeinsamer Ziffernblock zum Eingeben der Antwort */
 function numpad(host, answer, api){
   const disp=el("div",{class:"ansbox"},"?");
   let cur="";
@@ -369,46 +347,15 @@ function numpad(host, answer, api){
   host.append(pad);
 }
 
-/* Rechenaufgabe: a ± b = ? */
 RENDER.calc=(ex,host,api)=>{
   const eq=el("div",{class:"calc"});
   eq.append(document.createTextNode(ex.a+" "));
-  eq.append(el("span",{class:"op"},ex.op));
+  eq.append(el("span",{class:"op"},ex.op||"·"));
   eq.append(document.createTextNode(" "+ex.b+" = "));
   host.append(eq);
-  numpad(host, ex.answer, api);
+  numpad(host, (ex.answer!=null?ex.answer:ex.a*ex.b), api);
 };
 
-/* Zahlenhaus: Dach = beide Zimmer zusammen; ein Zimmer ist gesucht */
-RENDER.haus=(ex,host,api)=>{
-  const side = ex.side||"left";
-  host.append(el("div",{class:"center big",style:"margin-bottom:2px"},"Welche Zahl fehlt im Zimmer?"));
-  const h=el("div",{class:"haus"});
-  h.append(el("div",{class:"roof"}, String(ex.total)));
-  const rooms=el("div",{class:"rooms"});
-  rooms.append(el("div",{class:"room"+(side==="left"?"":" q")}, side==="left"?String(ex.given):"?"));
-  rooms.append(el("div",{class:"room"+(side==="right"?"":" q")}, side==="right"?String(ex.given):"?"));
-  h.append(rooms); host.append(h);
-  host.append(el("div",{class:"center muted",style:"margin:10px 0 0;font-size:.92rem"},"Beide Zimmer zusammen ergeben das Dach."));
-  numpad(host, ex.total-ex.given, api);
-};
-
-/* Zahlenmauer: jeder Stein = die beiden Steine darunter */
-RENDER.mauer=(ex,host,api)=>{
-  const [a,b,c]=ex.bottom; const m0=a+b, m1=b+c, t=m0+m1;
-  const vals={t,m0,m1,b0:a,b1:b,b2:c};
-  const brick=key=> el("div",{class:"brick"+(key===ex.hide?" q":"")}, key===ex.hide?"?":String(vals[key]));
-  host.append(el("div",{class:"center big",style:"margin-bottom:2px"},"Welcher Stein fehlt?"));
-  const wall=el("div",{class:"mauer"});
-  wall.append(el("div",{class:"mrow"}, brick("t")));
-  wall.append(el("div",{class:"mrow"}, brick("m0"), brick("m1")));
-  wall.append(el("div",{class:"mrow"}, brick("b0"), brick("b1"), brick("b2")));
-  host.append(wall);
-  host.append(el("div",{class:"center muted",style:"margin:8px 0 0;font-size:.92rem"},"Jeder Stein = die beiden Steine darunter zusammen."));
-  numpad(host, vals[ex.hide], api);
-};
-
-/* Multiple-Choice (für Erklär-Fragen) */
 RENDER.mc=(ex,host,api)=>{
   host.append(el("div",{class:"center big",style:"margin-bottom:10px",html:ex.q}));
   const box=el("div",{class:"center",style:"display:flex;flex-direction:column;gap:10px;align-items:center"});
@@ -422,126 +369,49 @@ RENDER.mc=(ex,host,api)=>{
 };
 
 /* =========================================================================
-   INHALTE  (Klasse 3 – Zahlenraum bis 100)
+   INHALTE  (das kleine Einmaleins)
    ========================================================================= */
 const STATION_DATA={};
+const mult=(a,b)=>({type:"calc", q:a+" · "+b+" = ?", a, b, op:"·", answer:a*b, explain:a+" · "+b+" = <b>"+(a*b)+"</b>."});
 
-/* --- Station 1: Plus & Minus ohne Zehnerübergang --- */
-STATION_DATA.plusminus={
-  teach:[
-    { mascot:"Bei Plus und Minus rechnest du <b>Schritt für Schritt</b>: zuerst die Einer, dann die Zehner.",
-      title:"Plus & Minus bis 100 ➕➖",
-      html:`<div style="font-size:1.12rem;line-height:1.9;text-align:left;max-width:420px;margin:0 auto">
-        Beispiel: <b>23 + 45</b><br>
-        ① Einer: 3 + 5 = <b>8</b><br>
-        ② Zehner: 20 + 40 = <b>60</b><br>
-        ③ Zusammen: <b>68</b> 🎉<br><br>
-        <span class="muted">Hier gibt es keinen Zehnerübergang – die Einer bleiben klein.</span></div>` }
-  ],
-  exercises:[
-    { type:"calc", q:"23 + 45 = ?", a:23, op:"+", b:45, answer:68, explain:"3+5=8, 20+40=60 → <b>68</b>." },
-    { type:"calc", q:"34 + 52 = ?", a:34, op:"+", b:52, answer:86, explain:"4+2=6, 30+50=80 → <b>86</b>." },
-    { type:"calc", q:"61 + 27 = ?", a:61, op:"+", b:27, answer:88, explain:"1+7=8, 60+20=80 → <b>88</b>." },
-    { type:"calc", q:"40 + 55 = ?", a:40, op:"+", b:55, answer:95, explain:"0+5=5, 40+50=90 → <b>95</b>." },
-    { type:"calc", q:"68 − 45 = ?", a:68, op:"−", b:45, answer:23, explain:"8−5=3, 60−40=20 → <b>23</b>." },
-    { type:"calc", q:"87 − 34 = ?", a:87, op:"−", b:34, answer:53, explain:"7−4=3, 80−30=50 → <b>53</b>." },
-    { type:"calc", q:"76 − 21 = ?", a:76, op:"−", b:21, answer:55, explain:"6−1=5, 70−20=50 → <b>55</b>." },
-    { type:"calc", q:"99 − 58 = ?", a:99, op:"−", b:58, answer:41, explain:"9−8=1, 90−50=40 → <b>41</b>." }
-  ]
+STATION_DATA.e2={
+  teach:[{ mascot:"<b>2 · 3</b> heißt: nimm <b>3-mal die 2</b> → 2 + 2 + 2 = 6.",
+    render(b){ b.append(el("h2",{class:"center"},"Die 2er-Reihe 2️⃣"));
+      b.append(el("div",{class:"reihe"},"2 · 4 · 6 · 8 · 10 · 12 · 14 · 16 · 18 · 20")); } }],
+  exercises:[ mult(2,3),mult(2,5),mult(2,7),mult(2,9),mult(2,4),mult(2,6),mult(2,8),mult(2,10) ]
 };
-
-/* --- Station 2: Zahlenhäuser (ohne Zehnerübergang) --- */
-STATION_DATA.haeuser={
-  teach:[
-    { mascot:"Ein <b>Zahlenhaus</b>: Oben auf dem Dach steht die ganze Zahl. Die beiden Zimmer darunter ergeben zusammen das Dach.",
-      title:"Zahlenhäuser 🏠",
-      render(b){
-        b.append(el("div",{class:"passage center",style:"font-size:1.1rem;line-height:1.9",
-          html:"Dach = <b>68</b>. Ein Zimmer ist <b>23</b>.<br>Was fehlt im anderen Zimmer?<br><b>68 − 23 = 45</b>"}));
-        const h=el("div",{class:"haus"});
-        h.append(el("div",{class:"roof"},"68"));
-        const rooms=el("div",{class:"rooms"});
-        rooms.append(el("div",{class:"room"},"23"));
-        rooms.append(el("div",{class:"room q"},"45"));
-        h.append(rooms); b.append(h);
-      } }
-  ],
-  exercises:[
-    { type:"haus", q:"Zahlenhaus: Dach 68, Zimmer 23", total:68, given:23, side:"left",  explain:"68 − 23 = <b>45</b>." },
-    { type:"haus", q:"Zahlenhaus: Dach 56, Zimmer 34", total:56, given:34, side:"left",  explain:"56 − 34 = <b>22</b>." },
-    { type:"haus", q:"Zahlenhaus: Dach 99, Zimmer 45", total:99, given:45, side:"right", explain:"99 − 45 = <b>54</b>." },
-    { type:"haus", q:"Zahlenhaus: Dach 78, Zimmer 6",  total:78, given:6,  side:"left",  explain:"78 − 6 = <b>72</b>." },
-    { type:"haus", q:"Zahlenhaus: Dach 87, Zimmer 52", total:87, given:52, side:"right", explain:"87 − 52 = <b>35</b>." },
-    { type:"haus", q:"Zahlenhaus: Dach 66, Zimmer 33", total:66, given:33, side:"left",  explain:"66 − 33 = <b>33</b>." }
-  ]
+STATION_DATA.e5_10={
+  teach:[{ mascot:"Die <b>5er-Reihe</b> endet immer auf <b>5 oder 0</b>. Bei der <b>10er-Reihe</b> hängst du einfach eine <b>0</b> an.",
+    render(b){ b.append(el("h2",{class:"center"},"5er & 10er 5️⃣"));
+      b.append(el("div",{class:"reihe"},"5 · 10 · 15 · 20 · 25 · 30 …"));
+      b.append(el("div",{class:"reihe"},"10 · 20 · 30 · 40 · 50 …")); } }],
+  exercises:[ mult(5,3),mult(5,6),mult(5,8),mult(5,9),mult(10,4),mult(10,7),mult(10,9),mult(5,7) ]
 };
-
-/* --- Station 3: Zahlenmauern (Addieren mit Zehnerübergang) --- */
-STATION_DATA.mauern={
-  teach:[
-    { mascot:"In einer <b>Zahlenmauer</b> ist jeder Stein so groß wie die <b>beiden Steine darunter zusammen</b>. Pass auf den Zehnerübergang auf!",
-      title:"Zahlenmauern 🧱",
-      render(b){
-        b.append(el("div",{class:"passage center",style:"font-size:1.08rem;line-height:1.8",
-          html:"Unten: <b>8, 7, 6</b><br>8 + 7 = <b>15</b> · 7 + 6 = <b>13</b><br>15 + 13 = <b>28</b>"}));
-        const wall=el("div",{class:"mauer"});
-        wall.append(el("div",{class:"mrow"}, el("div",{class:"brick"},"28")));
-        wall.append(el("div",{class:"mrow"}, el("div",{class:"brick"},"15"), el("div",{class:"brick"},"13")));
-        wall.append(el("div",{class:"mrow"}, el("div",{class:"brick"},"8"), el("div",{class:"brick"},"7"), el("div",{class:"brick"},"6")));
-        b.append(wall);
-      } }
-  ],
-  exercises:[
-    { type:"mauer", q:"Zahlenmauer – fehlender Stein (8,7,6)", bottom:[8,7,6], hide:"m0", explain:"8 + 7 = <b>15</b>." },
-    { type:"mauer", q:"Zahlenmauer – Spitze (8,7,6)",         bottom:[8,7,6], hide:"t",  explain:"15 + 13 = <b>28</b>." },
-    { type:"mauer", q:"Zahlenmauer – fehlender Stein (9,6,8)", bottom:[9,6,8], hide:"m1", explain:"6 + 8 = <b>14</b>." },
-    { type:"mauer", q:"Zahlenmauer – fehlender Stein (7,8,5)", bottom:[7,8,5], hide:"m0", explain:"7 + 8 = <b>15</b>." },
-    { type:"mauer", q:"Zahlenmauer – Spitze (6,9,7)",          bottom:[6,9,7], hide:"t",  explain:"15 + 16 = <b>31</b>." },
-    { type:"mauer", q:"Zahlenmauer – fehlender Stein (9,8,4)", bottom:[9,8,4], hide:"m0", explain:"9 + 8 = <b>17</b>." }
-  ]
+STATION_DATA.e3={
+  teach:[{ mascot:"Die <b>3er-Reihe</b>: immer <b>3 dazu</b> zählen.",
+    render(b){ b.append(el("h2",{class:"center"},"Die 3er-Reihe 3️⃣"));
+      b.append(el("div",{class:"reihe"},"3 · 6 · 9 · 12 · 15 · 18 · 21 · 24 · 27 · 30")); } }],
+  exercises:[ mult(3,3),mult(3,4),mult(3,6),mult(3,7),mult(3,8),mult(3,9),mult(3,5),mult(3,10) ]
 };
-
-/* --- Station: Subtrahieren mit Zehnerübergang (Borgen) --- */
-STATION_DATA["minus-uebergang"]={
-  teach:[
-    { mascot:"Beim Minus mit <b>Zehnerübergang</b> reichen die Einer nicht aus. Dann <b>leihst du dir</b> einen Zehner!",
-      title:"Minus mit Zehnerübergang ➖",
-      html:`<div style="font-size:1.1rem;line-height:1.9;text-align:left;max-width:430px;margin:0 auto">
-        Beispiel: <b>52 − 27</b><br>
-        ① 2 − 7 geht nicht → <b>leih</b> dir einen Zehner: 12 − 7 = <b>5</b><br>
-        ② Jetzt sind es nur noch 4 Zehner: 40 − 20 = <b>20</b><br>
-        ③ Zusammen: <b>25</b> 🎉</div>` }
-  ],
-  exercises:[
-    { type:"calc", q:"52 − 27 = ?", a:52, op:"−", b:27, answer:25, explain:"2−7 geht nicht → 12−7=5, dann 40−20=20 → <b>25</b>." },
-    { type:"calc", q:"63 − 28 = ?", a:63, op:"−", b:28, answer:35, explain:"13−8=5, dann 50−20=30 → <b>35</b>." },
-    { type:"calc", q:"71 − 34 = ?", a:71, op:"−", b:34, answer:37, explain:"11−4=7, dann 60−30=30 → <b>37</b>." },
-    { type:"calc", q:"84 − 59 = ?", a:84, op:"−", b:59, answer:25, explain:"14−9=5, dann 70−50=20 → <b>25</b>." },
-    { type:"calc", q:"90 − 43 = ?", a:90, op:"−", b:43, answer:47, explain:"10−3=7, dann 80−40=40 → <b>47</b>." },
-    { type:"calc", q:"45 − 18 = ?", a:45, op:"−", b:18, answer:27, explain:"15−8=7, dann 30−10=20 → <b>27</b>." },
-    { type:"calc", q:"66 − 29 = ?", a:66, op:"−", b:29, answer:37, explain:"16−9=7, dann 50−20=30 → <b>37</b>." },
-    { type:"calc", q:"80 − 27 = ?", a:80, op:"−", b:27, answer:53, explain:"10−7=3, dann 70−20=50 → <b>53</b>." }
-  ]
+STATION_DATA.e4={
+  teach:[{ mascot:"Die <b>4er-Reihe</b> ist das <b>Doppelte</b> der 2er-Reihe. 4 · 3 = 2 · 3 + 2 · 3.",
+    render(b){ b.append(el("h2",{class:"center"},"Die 4er-Reihe 4️⃣"));
+      b.append(el("div",{class:"reihe"},"4 · 8 · 12 · 16 · 20 · 24 · 28 · 32 · 36 · 40")); } }],
+  exercises:[ mult(4,3),mult(4,4),mult(4,6),mult(4,7),mult(4,8),mult(4,9),mult(4,5),mult(4,10) ]
 };
-
-/* --- Station 4: Rechen-Meister (gemischt) --- */
+STATION_DATA.gemischt={
+  teach:[{ mascot:"Jetzt alles <b>gemischt</b>! Denk an die passende Reihe. Du schaffst das! 🔀",
+    render(b){ b.append(el("h2",{class:"center"},"Gemischtes 1×1 🔀"));
+      b.append(el("div",{class:"center big"},"Aufgaben aus den Reihen 2, 3, 4, 5 und 10.")); } }],
+  exercises:[ mult(2,8),mult(5,6),mult(3,7),mult(4,9),mult(10,6),mult(3,8),mult(4,7),mult(5,9) ]
+};
 STATION_DATA.meister={
-  teach:[
-    { mascot:"Jetzt kommt alles zusammen: Plus, Minus, Zahlenhäuser und Zahlenmauern. Zeig, was du kannst! 🏆", mood:"cheer",
-      render(b){ b.append(el("h2",{class:"center"},"🏆 Rechen-Meister 🏆"));
-        b.append(el("div",{class:"center big"},"Gemischte Aufgaben aus allen Stationen. Los geht's!")); } }
-  ],
-  exercises:[
-    { type:"calc",  q:"47 + 28 = ?", a:47, op:"+", b:28, answer:75, explain:"7+8=15 (schreibe 5, merke 1), 40+20+10=70 → <b>75</b>." },
-    { type:"calc",  q:"63 − 21 = ?", a:63, op:"−", b:21, answer:42, explain:"3−1=2, 60−20=40 → <b>42</b>." },
-    { type:"haus",  q:"Zahlenhaus: Dach 88, Zimmer 45", total:88, given:45, side:"left",  explain:"88 − 45 = <b>43</b>." },
-    { type:"haus",  q:"Zahlenhaus: Dach 96, Zimmer 54", total:96, given:54, side:"right", explain:"96 − 54 = <b>42</b>." },
-    { type:"mauer", q:"Zahlenmauer – Spitze (8,7,6)",          bottom:[8,7,6], hide:"t",  explain:"15 + 13 = <b>28</b>." },
-    { type:"mauer", q:"Zahlenmauer – fehlender Stein (9,8,4)", bottom:[9,8,4], hide:"m0", explain:"9 + 8 = <b>17</b>." }
-  ]
+  teach:[{ mascot:"Die <b>schwierigen Reihen</b>: 6er, 7er, 8er und 9er. Zeig, dass du ein 1×1-Meister bist! 🏆", mood:"cheer",
+    render(b){ b.append(el("h2",{class:"center"},"🏆 1×1-Meister 🏆"));
+      b.append(el("div",{class:"center big"},"Die kniffligen Aufgaben – 6, 7, 8 und 9.")); } }],
+  exercises:[ mult(6,7),mult(8,6),mult(7,7),mult(9,4),mult(6,8),mult(7,8),mult(9,9),mult(8,8) ]
 };
 
-/* ---- Nach dem Laden ---------------------------------------------------- */
 function routeStart(){
   updTotal();
   const r=Store.getProgress();
@@ -554,7 +424,7 @@ $("#soundBtn").addEventListener("click",function(){
 });
 
 /* ---- Einzelne Frage aus dem Elternbericht üben ------------------------- */
-const TOPIC_ID="rechnen-100";
+const TOPIC_ID="einmaleins";
 let practiceTimer=null;
 function runPractice(stationId, exi){
   clearTimeout(practiceTimer);
@@ -588,7 +458,7 @@ function runPractice(stationId, exi){
       done:(ok)=>{
         fb.className="feedback show "+(ok?"ok":"no"); fb.innerHTML="";
         fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
-        const msg=el("div"); msg.innerHTML = ok ? "Richtig gerechnet! Klasse! ⭐" : (ex.explain||"Rechne noch einmal genau nach."); fb.append(msg);
+        const msg=el("div"); msg.innerHTML = ok ? "Richtig gerechnet! Klasse! ⭐" : (ex.explain||"Denk an die Reihe und probiere nochmal."); fb.append(msg);
         if(ok){ Sound.good(); Store.clearStat(stationId, exi);
           const more = SchoolCloud.openQuestions().length>0;
           fb.append(el("button",{class:"btn green",style:"margin-left:auto",onclick:goNext}, more?"Weiter →":"✓ Fertig – zum Bericht"));
