@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Mal-Fuchs ✖️ – Malrechnen</title>
+<link rel="stylesheet" href="../../shared/styles.css">
+<link rel="manifest" href="../../manifest.webmanifest">
+<meta name="theme-color" content="#7ec8ff">
+<link rel="apple-touch-icon" href="../../icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Lernportal">
+<style>
+.emoji-mascot{display:flex;align-items:center;justify-content:center;font-size:60px;
+  background:#eef4ff;border-radius:50%;box-shadow:var(--shadow-s)}
+.calc{font-size:2.4rem;font-weight:900;text-align:center;margin:6px 0 2px;letter-spacing:1px;color:var(--ink)}
+.calc .op{color:var(--brand-d);margin:0 8px}
+.ansbox{display:inline-block;min-width:96px;font-size:2rem;font-weight:900;text-align:center;
+  background:var(--paper-2);border:3px solid var(--sky-1);border-radius:14px;padding:6px 14px;margin:10px auto;color:var(--ink)}
+.numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:270px;margin:8px auto 0}
+.numkey{font:inherit;font-weight:800;font-size:1.4rem;padding:14px 0;border:none;border-radius:14px;
+  background:#fff;box-shadow:var(--shadow-s);cursor:pointer;color:var(--ink)}
+.numkey:active{transform:translateY(2px)}
+.numkey.ok{background:var(--green);color:#fff}
+.numkey.del{background:#ffe6e6}
+.reihe{font-size:1.25rem;font-weight:800;letter-spacing:1px;color:var(--brand-d);text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+<canvas id="confetti"></canvas>
+
+<div id="app">
+  <div class="topbar">
+    <div class="brand"><span class="logo">✖️</span><span>Mal-Fuchs</span></div>
+    <div class="score"><span class="star">★</span><span id="totalStars">0</span></div>
+    <button class="iconbtn" id="soundBtn" title="Ton an/aus">🔊</button>
+  </div>
+  <div id="screen"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="../../shared/config.js"></script>
+<script src="../../shared/cloud.js"></script>
+<script>
+"use strict";
+
+const $  = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
+function el(tag, attrs={}, ...kids){
+  const n=document.createElement(tag);
+  for(const k in attrs){
+    if(k==="class") n.className=attrs[k];
+    else if(k==="html") n.innerHTML=attrs[k];
+    else if(k.startsWith("on")&&typeof attrs[k]==="function") n.addEventListener(k.slice(2),attrs[k]);
+    else if(attrs[k]!=null) n.setAttribute(k,attrs[k]);
+  }
+  for(const c of kids){ if(c==null) continue; n.append(c.nodeType?c:document.createTextNode(c)); }
+  return n;
+}
+const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=rnd(0,i);[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+const Sound=(()=>{
+  let ctx=null, on=true;
+  function ac(){ if(!ctx) ctx=new (window.AudioContext||window.webkitAudioContext)();
+    if(ctx.state==="suspended"){ ctx.resume(); } return ctx; }
+  ["pointerdown","touchstart","keydown","click"].forEach(ev=>
+    window.addEventListener(ev,()=>{ try{ ac(); }catch(e){} },{passive:true}));
+  function tone(f,t,dur,type="sine",vol=.18){
+    if(!on) return; const c=ac(); const o=c.createOscillator(),g=c.createGain();
+    o.type=type;o.frequency.setValueAtTime(f,t);o.connect(g);g.connect(c.destination);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.01);
+    g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.start(t);o.stop(t+dur);
+  }
+  return {
+    set(v){on=v;}, get(){return on;},
+    click(){if(!on)return;const t=ac().currentTime;tone(440,t,.06,"triangle",.10);},
+    good(){if(!on)return;const t=ac().currentTime;[523,659,784].forEach((f,i)=>tone(f,t+i*.09,.18,"sine",.16));},
+    wrong(){if(!on)return;const t=ac().currentTime;tone(280,t,.18,"sawtooth",.1);tone(200,t+.12,.22,"sawtooth",.1);},
+    win(){if(!on)return;const t=ac().currentTime;[523,587,659,784,880,1046].forEach((f,i)=>tone(f,t+i*.12,.3,"triangle",.16));}
+  };
+})();
+
+const Confetti=(()=>{
+  const cv=$("#confetti"),cx=cv.getContext("2d");let parts=[],raf=null;
+  function size(){cv.width=innerWidth;cv.height=innerHeight;}
+  addEventListener("resize",size);
+  const COL=["#ff7a59","#ffd23f","#36c98d","#3aa0ff","#9b6bff","#ff79c6"];
+  function burst(n=160){
+    size();cv.style.display="block";
+    for(let i=0;i<n;i++)parts.push({x:innerWidth/2+rnd(-60,60),y:innerHeight/3,
+      vx:rnd(-90,90)/10,vy:rnd(-150,-40)/10,g:.18+Math.random()*.12,
+      s:rnd(6,13),c:pick(COL),r:Math.random()*6,vr:(Math.random()-.5)*.5,life:rnd(80,140)});
+    if(!raf)loop();
+  }
+  function loop(){
+    cx.clearRect(0,0,cv.width,cv.height);
+    parts.forEach(p=>{p.vy+=p.g;p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;p.life--;
+      cx.save();cx.translate(p.x,p.y);cx.rotate(p.r);cx.fillStyle=p.c;
+      cx.fillRect(-p.s/2,-p.s/2,p.s,p.s*.6);cx.restore();});
+    parts=parts.filter(p=>p.life>0&&p.y<cv.height+30);
+    if(parts.length)raf=requestAnimationFrame(loop);
+    else{raf=null;cv.style.display="none";}
+  }
+  return {burst};
+})();
+
+const toast=SchoolCloud.toast;
+
+const Store = SchoolCloud.store("malrechnen");
+const Cloud = { ready: SchoolCloud.ready };
+function renderCodeScreen(firstRun){ SchoolCloud.showCodeScreen(firstRun, routeStart); }
+
+function mascotRow(text,mood="happy"){
+  const row=el("div",{class:"mascot-row"});
+  const face = mood==="cheer"?"🦊🎉":mood==="think"?"🦊🤔":"🦊";
+  row.append(el("div",{class:"mascot emoji-mascot"},face));
+  row.append(el("div",{class:"bubble",html:text}));
+  return row;
+}
+function setScreen(node){const s=$("#screen");s.innerHTML="";s.append(node);window.scrollTo(0,0);}
+function updTotal(){const e=$("#totalStars");if(e)e.textContent=Store.total();}
+
+/* =========================================================================
+   STATIONEN
+   ========================================================================= */
+const STATIONS=[
+  {id:"klein",    n:"Kleine Mal-Aufgaben", e:"🐣", c:"--green"},
+  {id:"groesser", n:"Größere Zahlen",      e:"🌱", c:"--blue"},
+  {id:"null_eins",n:"Mal 0 und mal 1",     e:"✨", c:"--purple"},
+  {id:"mal10",    n:"Mal 10 & mal 100",    e:"🔟", c:"--pink"},
+  {id:"hunderter",n:"Mal Hunderter",       e:"💯", c:"--brand"},
+  {id:"grosse",   n:"Große Mal-Aufgaben",  e:"🧗", c:"--blue"},
+  {id:"meister",  n:"Mal-Meister",         e:"🏆", c:"--gold", master:true}
+];
+
+function renderHub(){
+  updTotal();
+  const wrap=el("div",{class:"screen"});
+  wrap.append(el("h1",{class:"hub-title"},"✖️ Malrechnen"));
+  wrap.append(el("div",{class:"hub-sub"},"Malnehmen üben – Schritt für Schritt"));
+  wrap.append(mascotRow("Hallo! Ich bin <b>Felix der Mal-Fuchs</b> 🦊. Wir starten ganz klein und werden Stück für Stück besser! 💪"));
+
+  const prog=Store.getProgress();
+  if(prog && STATION_DATA[prog.id]){
+    const ps=STATIONS.find(x=>x.id===prog.id);
+    const cont=el("div",{class:"center",style:"margin:2px 0 12px"});
+    cont.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();startStation(prog.id,prog);}},
+      "▶ Weitermachen: "+(ps?ps.n:"")+" – Aufgabe "+((prog.i||0)+1)));
+    wrap.append(cont);
+  }
+
+  const grid=el("div",{class:"stations"});
+  let prevDone=true;
+  STATIONS.forEach((s,i)=>{
+    const stars=Store.stars(s.id), done=Store.data.done[s.id];
+    const locked = !prevDone && !done;
+    const card=el("div",{class:"station"+(s.master?" master":"")+(done?" done":"")+(locked?" locked":"")});
+    card.style.borderColor = done? "var(--gold)":"transparent";
+    card.append(el("span",{class:"num"},String(i+1)));
+    card.append(el("span",{class:"emoji"},s.e));
+    card.append(el("div",{class:"nm"},s.n));
+    const sd=el("div",{class:"stars"});
+    for(let k=0;k<3;k++)sd.append(el("span",{class:"s"+(k<stars?" on":"")},"★"));
+    card.append(sd);
+    if(!locked) card.addEventListener("click",()=>{Sound.click();startStation(s.id);});
+    grid.append(card);
+    prevDone = done;
+  });
+  wrap.append(grid);
+
+  const foot=el("div",{class:"center",style:"margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  foot.append(el("button",{class:"btn gray",onclick:()=>{location.href="../../index.html";}},"← Themen"));
+  foot.append(el("button",{class:"btn gray",onclick:()=>{
+      if(confirm("Fortschritt in diesem Thema zurücksetzen?")){Store.reset();renderHub();}
+    }},"↺ Neu starten"));
+  if(Cloud.ready()){
+    foot.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();renderCodeScreen(false);}},
+      "☁️ Code: "+(SchoolCloud.code()||"—")));
+  }
+  wrap.append(foot);
+  setScreen(wrap);
+}
+
+function stationHeader(id,step){
+  const s=STATIONS.find(x=>x.id===id);
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",
+    onclick:()=>{Sound.click();renderHub();}},"← Karte"));
+  bar.append(el("div",{class:"brand"},el("span",{},s.e+" "+s.n)));
+  bar.append(el("div",{class:"steplabel"},step||""));
+  return bar;
+}
+
+function startStation(id,resume){
+  const data=STATION_DATA[id];
+  if(!data){toast("Diese Station wird noch gebaut …");return;}
+  const teach=data.teach||[];
+  const exercises=data.exercises||[];
+  let ti=0;
+  if(resume){ runExercises(id,exercises,resume); return; }
+  if(teach.length) showTeach(); else runExercises(id,exercises);
+
+  function showTeach(){
+    const card=teach[ti];
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id,"Erklärung "+(ti+1)+"/"+teach.length));
+    const body=el("div",{class:"card"});
+    if(card.render){ card.render(body); }
+    else {
+      if(card.title) body.append(el("h2",{class:"center"},card.title));
+      if(card.html)  body.append(el("div",{class:"center",html:card.html}));
+    }
+    scr.append(card.mascot? mascotRow(card.mascot,card.mood||"think"):document.createTextNode(""));
+    scr.append(body);
+    const nav=el("div",{class:"center",style:"margin-top:8px"});
+    nav.append(el("button",{class:"btn lg green",onclick:()=>{
+      Sound.click(); ti++;
+      if(ti<teach.length) showTeach(); else runExercises(id,exercises);
+    }}, ti<teach.length-1?"Weiter →":"Los, üben! 🦊"));
+    scr.append(nav);
+    setScreen(scr);
+  }
+}
+
+function runExercises(id,list,resume){
+  let i=resume && resume.i<list.length ? resume.i : 0,
+      wrongTotal=resume ? resume.wrongTotal||0 : 0;
+  const stName=()=>(STATIONS.find(s=>s.id===id)||{}).n;
+  const exLbl=()=>list[i] ? (list[i].q||("Aufgabe "+(i+1))) : "";
+  const logWrong=()=>Store.recordWrong(id,i,exLbl(),stName());
+  next();
+
+  function next(){
+    if(i>=list.length){ return finish(); }
+    Store.saveProgress({id, i, wrongTotal});
+    const ex=list[i];
+    Store.recordSeen(id,i,exLbl(),stName());
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id));
+    const pr=el("div",{class:"card"});
+    const bar=el("div",{class:"progress"});const fill=el("i");bar.append(fill);
+    pr.append(bar);
+    fill.style.width=(i/list.length*100)+"%";
+    pr.append(el("div",{class:"steplabel"},"Aufgabe "+(i+1)+" von "+list.length));
+    scr.append(pr);
+
+    const host=el("div",{class:"card"});
+    scr.append(host);
+    const fb=el("div",{class:"feedback"});scr.append(fb);
+    setScreen(scr);
+
+    const api={
+      done:(ok)=>{ if(ok){ fill.style.width=((i+1)/list.length*100)+"%"; }
+        afterAnswer(ok,ex,fb,()=>{ i++; next(); }); },
+      wrong:()=>{ wrongTotal++; logWrong(); }
+    };
+    renderExercise(ex,host,api);
+  }
+
+  function afterAnswer(ok,ex,fb,cont){
+    fb.className="feedback show "+(ok?"ok":"no");
+    fb.innerHTML="";
+    fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+    const msg=el("div");
+    msg.innerHTML = ok ? pick(["Super!","Richtig! ⭐","Klasse!","Genau!","Stark gerechnet!"])
+                       : (ex.explain||"Schau nochmal genau hin und probiere es nochmal.");
+    fb.append(msg);
+    if(ok)Sound.good(); else Sound.wrong();
+    if(ok){
+      fb.append(el("button",{class:"btn green",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");cont();}},"Weiter →"));
+    }else{
+      fb.append(el("button",{class:"btn blue",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");retry();}},"Nochmal →"));
+    }
+    function retry(){
+      const host=fb.previousSibling;
+      host.innerHTML=""; renderExercise(ex,host,{
+        done:(ok2)=>{ afterAnswer(ok2,ex,fb,()=>{i++;next();}); },
+        wrong:()=>{wrongTotal++; logWrong();}
+      });
+    }
+  }
+
+  function finish(){
+    Store.clearProgress();
+    let stars = wrongTotal===0?3 : (wrongTotal<=2?2:1);
+    Store.setStars(id,stars); updTotal();
+    const isMaster = id==="meister";
+    const scr=el("div",{class:"result screen"});
+    scr.append(stationHeader(id,"Geschafft!"));
+    const card=el("div",{class:"card center"});
+    card.append(el("div",{class:"huge"}, isMaster?"🏆 MAL-MEISTER! 🏆":"Geschafft! 🎉"));
+    const st=el("div",{class:"bigstars"});
+    for(let k=0;k<3;k++)st.append(el("span",{class:"s"},"★"));
+    card.append(st);
+    card.append(el("p",{class:"big"}, stars===3?"Perfekt – alles richtig!":stars===2?"Sehr gut gerechnet!":"Geschafft – Übung macht den Meister!"));
+    if(isMaster){
+      card.append(el("div",{class:"badge"},"🏅"));
+      card.append(el("p",{html:"Du bist ein echter <b>Mal-Meister</b>! Vom kleinen Mal bis zu großen Zahlen. 🦊"}));
+    }
+    const nav=el("div",{style:"margin-top:10px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+    nav.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();renderHub();}},"🗺️ Zur Karte"));
+    nav.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();startStation(id);}},"↻ Nochmal"));
+    const idx=STATIONS.findIndex(s=>s.id===id);
+    if(idx<STATIONS.length-1){
+      nav.append(el("button",{class:"btn",onclick:()=>{Sound.click();startStation(STATIONS[idx+1].id);}},"Nächste Station →"));
+    }
+    card.append(nav);
+    scr.append(card);
+    setScreen(scr);
+    setTimeout(()=>{ const ss=$$(".bigstars .s");
+      for(let k=0;k<stars;k++)setTimeout(()=>{ss[k].classList.add("on");Sound.good();},k*350);
+    },200);
+    if(stars>=3||isMaster){Confetti.burst(isMaster?240:160);Sound.win();}
+    else if(stars===2){Confetti.burst(90);Sound.good();}
+  }
+}
+
+/* =========================================================================
+   RENDERER  (calc mit Ziffernblock)
+   ========================================================================= */
+function renderExercise(ex,host,api){ (RENDER[ex.type]||RENDER.calc)(ex,host,api); }
+const RENDER={};
+
+function numpad(host, answer, api){
+  const disp=el("div",{class:"ansbox"},"?");
+  let cur="";
+  const upd=()=>{ disp.textContent = cur===""?"?":cur; };
+  host.append(el("div",{class:"center"}, disp));
+  const pad=el("div",{class:"numpad"});
+  ["1","2","3","4","5","6","7","8","9","⌫","0","✓"].forEach(k=>{
+    const cls="numkey"+(k==="✓"?" ok":k==="⌫"?" del":"");
+    pad.append(el("button",{class:cls,onclick:()=>{ Sound.click();
+      if(k==="⌫"){ cur=cur.slice(0,-1); upd(); }
+      else if(k==="✓"){
+        if(cur===""){ toast("Gib zuerst eine Zahl ein"); return; }
+        if(parseInt(cur,10)===answer){ api.done(true); }
+        else { api.wrong(); api.done(false); }
+      } else { if(cur.length<4){ cur+=k; upd(); } }
+    }},k));
+  });
+  host.append(pad);
+}
+
+RENDER.calc=(ex,host,api)=>{
+  const eq=el("div",{class:"calc"});
+  eq.append(document.createTextNode(ex.a+" "));
+  eq.append(el("span",{class:"op"},ex.op||"·"));
+  eq.append(document.createTextNode(" "+ex.b+" = "));
+  host.append(eq);
+  numpad(host, (ex.answer!=null?ex.answer:ex.a*ex.b), api);
+};
+
+RENDER.mc=(ex,host,api)=>{
+  host.append(el("div",{class:"center big",style:"margin-bottom:10px",html:ex.q}));
+  const box=el("div",{class:"center",style:"display:flex;flex-direction:column;gap:10px;align-items:center"});
+  shuffle(ex.options).forEach(o=>{
+    box.append(el("button",{class:"btn lg",html:o.label,onclick:function(){
+      if(o.ok){ this.classList.add("green"); Sound.click(); api.done(true); }
+      else{ this.classList.add("gray"); this.setAttribute("disabled",""); Sound.wrong(); api.wrong(); api.done(false); }
+    }}));
+  });
+  host.append(box);
+};
+
+/* =========================================================================
+   INHALTE  (Malrechnen – von klein bis groß)
+   ========================================================================= */
+const STATION_DATA={};
+const mult=(a,b,explain)=>({type:"calc", q:a+" · "+b+" = ?", a, b, op:"·", answer:a*b,
+  explain: explain || (a+" · "+b+" = <b>"+(a*b)+"</b>.")});
+
+/* 1) klein starten */
+STATION_DATA.klein={
+  teach:[{ mascot:"<b>Malnehmen</b> heißt: eine Zahl <b>mehrmals</b> nehmen. <b>2 · 3</b> = 2 + 2 + 2 = <b>6</b>.",
+    render(b){ b.append(el("h2",{class:"center"},"Kleine Mal-Aufgaben 🐣"));
+      b.append(el("div",{class:"reihe"},"2 · 2 = 4   ·   2 · 3 = 6   ·   3 · 3 = 9")); } }],
+  exercises:[ mult(2,2),mult(2,3),mult(3,2),mult(3,3),mult(2,4),mult(4,2),mult(3,4),mult(5,2) ]
+};
+/* 2) größere Zahlen */
+STATION_DATA.groesser={
+  teach:[{ mascot:"Jetzt <b>größere Zahlen</b> bis <b>10</b>. Denk an die Reihen – du schaffst das! 💪",
+    render(b){ b.append(el("h2",{class:"center"},"Größere Zahlen 🌱"));
+      b.append(el("div",{class:"reihe"},"6 · 7 = 42   ·   8 · 8 = 64   ·   9 · 9 = 81")); } }],
+  exercises:[ mult(6,3),mult(7,4),mult(6,7),mult(8,5),mult(9,6),mult(8,8),mult(7,9),mult(9,9) ]
+};
+/* 3) Tricks: mal 0 und mal 1 */
+STATION_DATA.null_eins={
+  teach:[{ mascot:"Zwei <b>Zaubertricks</b>: <b>mal 0</b> ist <b>immer 0</b>. Und <b>mal 1</b> lässt die Zahl <b>gleich</b>.",
+    render(b){ b.append(el("h2",{class:"center"},"Mal 0 und mal 1 ✨"));
+      b.append(el("div",{class:"reihe"},"7 · 0 = 0   ·   9 · 1 = 9")); } }],
+  exercises:[
+    {type:"mc", q:"Was ist <b>8 · 0</b>?", options:[{label:"0",ok:true},{label:"8",ok:false},{label:"80",ok:false}],
+      explain:"<b>Mal 0</b> ist immer <b>0</b>."},
+    mult(7,0,"Mal 0 ist immer <b>0</b>."), mult(0,5,"Mal 0 ist immer <b>0</b>."), mult(4,0,"Mal 0 ist immer <b>0</b>."),
+    {type:"mc", q:"Was ist <b>6 · 1</b>?", options:[{label:"6",ok:true},{label:"1",ok:false},{label:"0",ok:false}],
+      explain:"<b>Mal 1</b> lässt die Zahl gleich: <b>6</b>."},
+    mult(9,1,"Mal 1 lässt die Zahl gleich: <b>9</b>."), mult(1,8,"Mal 1 lässt die Zahl gleich: <b>8</b>."), mult(0,10,"Mal 0 ist immer <b>0</b>.")
+  ]
+};
+/* 4) Tricks: mal 10 und mal 100 */
+STATION_DATA.mal10={
+  teach:[{ mascot:"<b>Mal 10</b>: hänge <b>eine 0</b> an. <b>Mal 100</b>: hänge <b>zwei Nullen</b> an. Ganz einfach!",
+    render(b){ b.append(el("h2",{class:"center"},"Mal 10 & mal 100 🔟"));
+      b.append(el("div",{class:"reihe"},"4 · 10 = 40   ·   7 · 100 = 700")); } }],
+  exercises:[
+    mult(4,10,"Mal 10: eine 0 anhängen → <b>40</b>."), mult(7,10,"Mal 10: eine 0 anhängen → <b>70</b>."),
+    mult(10,6,"Mal 10: eine 0 anhängen → <b>60</b>."), mult(9,10,"Mal 10: eine 0 anhängen → <b>90</b>."),
+    mult(3,100,"Mal 100: zwei Nullen anhängen → <b>300</b>."), mult(5,100,"Mal 100: zwei Nullen anhängen → <b>500</b>."),
+    mult(100,8,"Mal 100: zwei Nullen anhängen → <b>800</b>."), mult(2,100,"Mal 100: zwei Nullen anhängen → <b>200</b>.")
+  ]
+};
+/* 5) mal Hunderter */
+STATION_DATA.hunderter={
+  teach:[{ mascot:"<b>Mal Hunderter</b>: rechne erst klein, dann hänge <b>zwei Nullen</b> an. <b>3 · 200</b> → 3 · 2 = 6 → <b>600</b>.",
+    render(b){ b.append(el("h2",{class:"center"},"Mal Hunderter 💯"));
+      b.append(el("div",{class:"reihe"},"3 · 200 = 600   ·   4 · 300 = 1200")); } }],
+  exercises:[
+    mult(3,200,"3 · 2 = 6, dann zwei Nullen → <b>600</b>."), mult(4,200,"4 · 2 = 8, dann zwei Nullen → <b>800</b>."),
+    mult(2,300,"2 · 3 = 6, dann zwei Nullen → <b>600</b>."), mult(3,300,"3 · 3 = 9, dann zwei Nullen → <b>900</b>."),
+    mult(2,400,"2 · 4 = 8, dann zwei Nullen → <b>800</b>."), mult(5,200,"5 · 2 = 10, dann zwei Nullen → <b>1000</b>."),
+    mult(4,300,"4 · 3 = 12, dann zwei Nullen → <b>1200</b>."), mult(6,200,"6 · 2 = 12, dann zwei Nullen → <b>1200</b>.")
+  ]
+};
+/* 6) große Mal-Aufgaben: einstellig · zweistellig */
+STATION_DATA.grosse={
+  teach:[{ mascot:"<b>Große Mal-Aufgaben</b>: <b>zerlege</b> die Zahl! <b>3 · 12</b> = 3 · 10 + 3 · 2 = 30 + 6 = <b>36</b>.",
+    render(b){ b.append(el("h2",{class:"center"},"Große Mal-Aufgaben 🧗"));
+      b.append(el("div",{class:"reihe"},"3 · 12 = 36   ·   4 · 21 = 84")); } }],
+  exercises:[
+    mult(3,12,"3 · 10 + 3 · 2 = 30 + 6 = <b>36</b>."), mult(4,11,"4 · 10 + 4 · 1 = 40 + 4 = <b>44</b>."),
+    mult(2,14,"2 · 10 + 2 · 4 = 20 + 8 = <b>28</b>."), mult(5,13,"5 · 10 + 5 · 3 = 50 + 15 = <b>65</b>."),
+    mult(3,21,"3 · 20 + 3 · 1 = 60 + 3 = <b>63</b>."), mult(4,12,"4 · 10 + 4 · 2 = 40 + 8 = <b>48</b>."),
+    mult(6,11,"6 · 10 + 6 · 1 = 60 + 6 = <b>66</b>."), mult(4,21,"4 · 20 + 4 · 1 = 80 + 4 = <b>84</b>.")
+  ]
+};
+/* 7) Meister: alles gemischt */
+STATION_DATA.meister={
+  teach:[{ mascot:"Jetzt <b>alles gemischt</b> – von mal 0 bis zu großen Zahlen. Zeig, dass du ein <b>Mal-Meister</b> bist! 🏆", mood:"cheer",
+    render(b){ b.append(el("h2",{class:"center"},"🏆 Mal-Meister 🏆"));
+      b.append(el("div",{class:"center big"},"Aufgaben aus allen Stationen.")); } }],
+  exercises:[ mult(0,9,"Mal 0 ist immer <b>0</b>."),mult(7,8),mult(4,100,"Mal 100: zwei Nullen → <b>400</b>."),mult(3,13,"3 · 10 + 3 · 3 = <b>39</b>."),mult(6,9),mult(2,300,"2 · 3 = 6, zwei Nullen → <b>600</b>."),mult(8,7),mult(4,12,"4 · 10 + 4 · 2 = <b>48</b>.") ]
+};
+
+function routeStart(){
+  updTotal();
+  const r=Store.getProgress();
+  if(r && STATION_DATA[r.id]) startStation(r.id,r);
+  else renderHub();
+}
+
+$("#soundBtn").addEventListener("click",function(){
+  const on=!Sound.get();Sound.set(on);this.textContent=on?"🔊":"🔇";if(on)Sound.click();
+});
+
+/* ---- Einzelne Frage aus dem Elternbericht üben ------------------------- */
+const TOPIC_ID="malrechnen";
+let practiceTimer=null;
+function runPractice(stationId, exi){
+  clearTimeout(practiceTimer);
+  const data=STATION_DATA[stationId];
+  const ex = data && data.exercises && data.exercises[+exi];
+  const back=()=>{ clearTimeout(practiceTimer); location.href="../../index.html#report"; };
+  if(!ex){ back(); return; }
+  function goNext(){
+    clearTimeout(practiceTimer);
+    const open=SchoolCloud.openQuestions();
+    if(open.length===0){ back(); return; }
+    const nx=open.filter(q=>q.topic===TOPIC_ID)[0]||open[0];
+    if(nx.topic===TOPIC_ID) runPractice(nx.station, nx.exi);
+    else location.href="../"+nx.topic+"/index.html#practice="+encodeURIComponent(nx.station+":"+nx.exi);
+  }
+  const scr=el("div",{class:"screen"});
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",onclick:back},"← Bericht"));
+  bar.append(el("div",{class:"brand"},el("span",{},"🔁 Üben")));
+  const openNow=SchoolCloud.openQuestions().length;
+  bar.append(el("div",{class:"steplabel"}, openNow>1 ? ("noch "+openNow+" offen") : ((STATIONS.find(s=>s.id===stationId)||{}).n||"")));
+  scr.append(bar);
+  scr.append(mascotRow("Rechne diese Aufgabe noch einmal – du schaffst das! 💪","think"));
+  const host=el("div",{class:"card"}); scr.append(host);
+  const fb=el("div",{class:"feedback"}); scr.append(fb);
+  setScreen(scr);
+  render();
+  function render(){
+    host.innerHTML="";
+    renderExercise(ex, host, {
+      done:(ok)=>{
+        fb.className="feedback show "+(ok?"ok":"no"); fb.innerHTML="";
+        fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+        const msg=el("div"); msg.innerHTML = ok ? "Richtig gerechnet! Klasse! ⭐" : (ex.explain||"Schau nochmal genau hin und probiere es nochmal."); fb.append(msg);
+        if(ok){ Sound.good(); Store.clearStat(stationId, exi);
+          const more = SchoolCloud.openQuestions().length>0;
+          fb.append(el("button",{class:"btn green",style:"margin-left:auto",onclick:goNext}, more?"Weiter →":"✓ Fertig – zum Bericht"));
+          practiceTimer=setTimeout(goNext, 1500);
+        } else { Sound.wrong();
+          fb.append(el("button",{class:"btn blue",style:"margin-left:auto",onclick:()=>{fb.classList.remove("show"); render();}},"Nochmal →"));
+        }
+      },
+      wrong:()=>{}
+    });
+  }
+}
+
+function startHere(){
+  const m=/^#practice=([^:]+):(\d+)$/.exec(decodeURIComponent(location.hash||""));
+  if(m){ history.replaceState(null,"",location.pathname); runPractice(m[1], m[2]); return; }
+  routeStart();
+}
+SchoolCloud.bootSync(startHere);
+
+if("serviceWorker" in navigator){ window.addEventListener("load",()=>navigator.serviceWorker.register("../../sw.js").catch(()=>{})); }
+
+(function clouds(){const b=document.body;for(let i=0;i<4;i++){const c=el("div",{class:"cloud"});
+  c.style.top=(8+i*16)+"%";c.style.width=(60+rnd(0,60))+"px";c.style.height=(20+rnd(0,14))+"px";
+  c.style.animationDuration=(40+rnd(0,40))+"s";c.style.animationDelay=(-rnd(0,40))+"s";b.append(c);}})();
+</script>
+</body>
+</html>
