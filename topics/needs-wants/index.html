@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Needs &amp; Wants 🛒 – English Practice</title>
+<link rel="stylesheet" href="../../shared/styles.css">
+<link rel="manifest" href="../../manifest.webmanifest">
+<meta name="theme-color" content="#7ec8ff">
+<link rel="apple-touch-icon" href="../../icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Lernportal">
+<style>
+.emoji-mascot{display:flex;align-items:center;justify-content:center;font-size:60px;
+  background:#eef4ff;border-radius:50%;box-shadow:var(--shadow-s)}
+.passage{font-size:1.08rem;line-height:1.75;text-align:left;color:var(--ink)}
+.passage h3{margin:.1em 0 .4em;color:var(--brand-d)}
+.readtoggle{margin:0 0 10px}
+.mchip{display:inline-flex;align-items:center;gap:6px;background:#fff;border:2px solid var(--sky-1);
+  border-radius:14px;padding:10px 16px;font-weight:700;font-size:1.03rem;cursor:pointer;
+  box-shadow:var(--shadow-s);transition:transform .1s}
+.mchip:active{transform:scale(.96)}
+.mchip.on{border-color:var(--green);background:#e6faf0}
+.mchip .box{width:20px;height:20px;border-radius:6px;border:2px solid var(--sky-1);display:inline-block;text-align:center;line-height:18px}
+.mchip.on .box{background:var(--green);border-color:var(--green);color:#fff}
+.mgrid{display:flex;flex-direction:column;gap:10px;align-items:stretch;max-width:420px;margin:0 auto}
+.tag-need{display:inline-block;background:#e6faf0;color:#1a7a45;border-radius:8px;padding:2px 10px;font-weight:800;font-size:.9rem;margin-right:4px}
+.tag-want{display:inline-block;background:#fff3cd;color:#8a6200;border-radius:8px;padding:2px 10px;font-weight:800;font-size:.9rem;margin-right:4px}
+</style>
+</head>
+<body>
+<canvas id="confetti"></canvas>
+
+<div id="app">
+  <div class="topbar">
+    <div class="brand"><span class="logo">🛒</span><span>Needs &amp; Wants</span></div>
+    <div class="score"><span class="star">★</span><span id="totalStars">0</span></div>
+    <button class="iconbtn" id="soundBtn" title="Sound on/off">🔊</button>
+  </div>
+  <div id="screen"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="../../shared/config.js"></script>
+<script src="../../shared/cloud.js"></script>
+<script>
+"use strict";
+
+/* ---- helpers ------------------------------------------------------------ */
+const $  = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
+function el(tag, attrs={}, ...kids){
+  const n=document.createElement(tag);
+  for(const k in attrs){
+    if(k==="class") n.className=attrs[k];
+    else if(k==="html") n.innerHTML=attrs[k];
+    else if(k.startsWith("on")&&typeof attrs[k]==="function") n.addEventListener(k.slice(2),attrs[k]);
+    else if(attrs[k]!=null) n.setAttribute(k,attrs[k]);
+  }
+  for(const c of kids){ if(c==null) continue; n.append(c.nodeType?c:document.createTextNode(c)); }
+  return n;
+}
+const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=rnd(0,i);[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+/* ---- Sound (WebAudio) --------------------------------------------------- */
+const Sound=(()=>{
+  let ctx=null, on=true;
+  function ac(){ if(!ctx) ctx=new (window.AudioContext||window.webkitAudioContext)();
+    if(ctx.state==="suspended"){ ctx.resume(); } return ctx; }
+  ["pointerdown","touchstart","keydown","click"].forEach(ev=>
+    window.addEventListener(ev,()=>{ try{ ac(); }catch(e){} },{passive:true}));
+  function tone(f,t,dur,type="sine",vol=.18){
+    if(!on) return; const c=ac(); const o=c.createOscillator(),g=c.createGain();
+    o.type=type;o.frequency.setValueAtTime(f,t);o.connect(g);g.connect(c.destination);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.01);
+    g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.start(t);o.stop(t+dur);
+  }
+  return {
+    set(v){on=v;}, get(){return on;},
+    click(){if(!on)return;const t=ac().currentTime;tone(440,t,.07,"triangle",.12);},
+    good(){if(!on)return;const t=ac().currentTime;[523,659,784].forEach((f,i)=>tone(f,t+i*.09,.18,"sine",.16));},
+    wrong(){if(!on)return;const t=ac().currentTime;tone(280,t,.18,"sawtooth",.1);tone(200,t+.12,.22,"sawtooth",.1);},
+    win(){if(!on)return;const t=ac().currentTime;[523,587,659,784,880,1046].forEach((f,i)=>tone(f,t+i*.12,.3,"triangle",.16));}
+  };
+})();
+
+/* ---- Confetti ----------------------------------------------------------- */
+const Confetti=(()=>{
+  const cv=$("#confetti"),cx=cv.getContext("2d");let parts=[],raf=null;
+  function size(){cv.width=innerWidth;cv.height=innerHeight;}
+  addEventListener("resize",size);
+  const COL=["#ff7a59","#ffd23f","#36c98d","#3aa0ff","#9b6bff","#ff79c6"];
+  function burst(n=160){
+    size();cv.style.display="block";
+    for(let i=0;i<n;i++)parts.push({x:innerWidth/2+rnd(-60,60),y:innerHeight/3,
+      vx:rnd(-90,90)/10,vy:rnd(-150,-40)/10,g:.18+Math.random()*.12,
+      s:rnd(6,13),c:pick(COL),r:Math.random()*6,vr:(Math.random()-.5)*.5,life:rnd(80,140)});
+    if(!raf)loop();
+  }
+  function loop(){
+    cx.clearRect(0,0,cv.width,cv.height);
+    parts.forEach(p=>{p.vy+=p.g;p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;p.life--;
+      cx.save();cx.translate(p.x,p.y);cx.rotate(p.r);cx.fillStyle=p.c;
+      cx.fillRect(-p.s/2,-p.s/2,p.s,p.s*.6);cx.restore();});
+    parts=parts.filter(p=>p.life>0&&p.y<cv.height+30);
+    if(parts.length)raf=requestAnimationFrame(loop);
+    else{raf=null;cv.style.display="none";}
+  }
+  return {burst};
+})();
+
+const toast=SchoolCloud.toast;
+
+/* ---- Store -------------------------------------------------------------- */
+const Store = SchoolCloud.store("needs-wants");
+const Cloud = { ready: SchoolCloud.ready };
+function renderCodeScreen(firstRun){ SchoolCloud.showCodeScreen(firstRun, routeStart); }
+
+/* ---- Mascot ------------------------------------------------------------- */
+function mascotRow(text,mood="happy"){
+  const row=el("div",{class:"mascot-row"});
+  const face = mood==="cheer"?"🦉🎉":mood==="think"?"🦉🔍":"🦉";
+  row.append(el("div",{class:"mascot emoji-mascot"},face));
+  row.append(el("div",{class:"bubble",html:text}));
+  return row;
+}
+
+/* ---- Screen helpers ----------------------------------------------------- */
+function setScreen(node){const s=$("#screen");s.innerHTML="";s.append(node);window.scrollTo(0,0);}
+function updTotal(){const e=$("#totalStars");if(e)e.textContent=Store.total();}
+
+/* ---- Read-again toggle -------------------------------------------------- */
+function readToggle(stationId){
+  const st=STATION_DATA[stationId];
+  const wrap=el("div",{class:"readtoggle center"});
+  if(!st||!st.text) return wrap;
+  const btn=el("button",{class:"btn blue",style:"font-size:1rem;padding:8px 16px"},"📖 Read the text again");
+  const box=el("div",{class:"card passage",style:"display:none;margin-top:8px",html:st.text});
+  btn.addEventListener("click",()=>{Sound.click();
+    const show=box.style.display==="none";
+    box.style.display=show?"block":"none";
+    btn.textContent=show?"📖 Hide text":"📖 Read the text again";
+  });
+  wrap.append(btn,box);
+  return wrap;
+}
+
+/* =========================================================================
+   STATIONS
+   ========================================================================= */
+const STATIONS=[
+  {id:"whatneed",  n:"What Are Needs?",    e:"🍞", c:"--brand"},
+  {id:"whatwant",  n:"What Are Wants?",    e:"🎮", c:"--yellow"},
+  {id:"thebigfour",n:"The Big Four Needs", e:"🏠", c:"--green"},
+  {id:"market",    n:"At the Market",      e:"🛒", c:"--blue"},
+  {id:"emmastory", n:"Emma's Week",        e:"👧", c:"--pink"},
+  {id:"compare",   n:"Needs vs. Wants",    e:"⚖️", c:"--purple"},
+  {id:"master",    n:"Champion Quiz",      e:"🏆", c:"--gold", master:true}
+];
+
+/* ---- Station card ------------------------------------------------------- */
+function renderHub(){
+  updTotal();
+  const wrap=el("div",{class:"screen"});
+  wrap.append(el("h1",{class:"hub-title"},"🛒 Needs &amp; Wants"));
+  wrap.append(el("div",{class:"hub-sub"},"Read and answer questions in English!"));
+  wrap.append(mascotRow("Hello! I am <b>Ollie the Owl</b> 🦉. We will learn the difference between things we <b>need</b> and things we <b>want</b>. Let's go! 🚀"));
+
+  const prog=Store.getProgress();
+  if(prog && STATION_DATA[prog.id]){
+    const ps=STATIONS.find(x=>x.id===prog.id);
+    const cont=el("div",{class:"center",style:"margin:2px 0 12px"});
+    cont.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();startStation(prog.id,prog);}},
+      "▶ Continue: "+(ps?ps.n:"")+" – Question "+((prog.i||0)+1)));
+    wrap.append(cont);
+  }
+
+  const grid=el("div",{class:"stations"});
+  let prevDone=true;
+  STATIONS.forEach((s,i)=>{
+    const stars=Store.stars(s.id), done=Store.data.done[s.id];
+    const locked = !prevDone && !done;
+    const card=el("div",{class:"station"+(s.master?" master":"")+(done?" done":"")+(locked?" locked":"")});
+    card.style.borderColor = done? "var(--gold)":"transparent";
+    card.append(el("span",{class:"num"},String(i+1)));
+    card.append(el("span",{class:"emoji"},s.e));
+    card.append(el("div",{class:"nm"},s.n));
+    const sd=el("div",{class:"stars"});
+    for(let k=0;k<3;k++)sd.append(el("span",{class:"s"+(k<stars?" on":"")},"★"));
+    card.append(sd);
+    if(!locked) card.addEventListener("click",()=>{Sound.click();startStation(s.id);});
+    grid.append(card);
+    prevDone = done;
+  });
+  wrap.append(grid);
+
+  const foot=el("div",{class:"center",style:"margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  foot.append(el("button",{class:"btn gray",onclick:()=>{location.href="../../index.html";}},"← Topics"));
+  foot.append(el("button",{class:"btn gray",onclick:()=>{
+      if(confirm("Reset progress for this topic?")){Store.reset();renderHub();}
+    }},"↺ Start Over"));
+  if(Cloud.ready()){
+    foot.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();renderCodeScreen(false);}},
+      "☁️ Code: "+(SchoolCloud.code()||"—")));
+  }
+  wrap.append(foot);
+  setScreen(wrap);
+}
+
+function stationHeader(id,step){
+  const s=STATIONS.find(x=>x.id===id);
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",
+    onclick:()=>{Sound.click();renderHub();}},"← Map"));
+  bar.append(el("div",{class:"brand"},el("span",{},s.e+" "+s.n)));
+  bar.append(el("div",{class:"steplabel"},step||""));
+  return bar;
+}
+
+/* ---- Station flow: read text → questions -------------------------------- */
+function startStation(id,resume){
+  const data=STATION_DATA[id];
+  if(!data){toast("This station is coming soon…");return;}
+  const teach=data.teach||[];
+  const exercises=data.exercises||[];
+  let ti=0;
+  if(resume){ runExercises(id,exercises,resume); return; }
+  if(teach.length) showTeach(); else runExercises(id,exercises);
+
+  function showTeach(){
+    const card=teach[ti];
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id,"Read "+(ti+1)+"/"+teach.length));
+    const body=el("div",{class:"card"});
+    if(card.render){ card.render(body); }
+    else {
+      if(card.title) body.append(el("h2",{class:"center"},card.title));
+      if(card.html)  body.append(el("div",{class:"passage",html:card.html}));
+    }
+    scr.append(card.mascot? mascotRow(card.mascot,card.mood||"happy"):document.createTextNode(""));
+    scr.append(body);
+    const nav=el("div",{class:"center",style:"margin-top:8px"});
+    nav.append(el("button",{class:"btn lg green",onclick:()=>{
+      Sound.click(); ti++;
+      if(ti<teach.length) showTeach(); else runExercises(id,exercises);
+    }}, ti<teach.length-1?"Next →":"Let's Answer! 🔍"));
+    scr.append(nav);
+    setScreen(scr);
+  }
+}
+
+/* ---- Exercise engine ---------------------------------------------------- */
+function runExercises(id,list,resume){
+  let i=resume && resume.i<list.length ? resume.i : 0,
+      wrongTotal=resume ? resume.wrongTotal||0 : 0;
+  const stName=()=>(STATIONS.find(s=>s.id===id)||{}).n;
+  const exLbl=()=>list[i] ? (list[i].q||("Question "+(i+1))) : "";
+  const logWrong=()=>Store.recordWrong(id,i,exLbl(),stName());
+  next();
+
+  function next(){
+    if(i>=list.length){ return finish(); }
+    Store.saveProgress({id, i, wrongTotal});
+    const ex=list[i];
+    Store.recordSeen(id,i,exLbl(),stName());
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id));
+    const pr=el("div",{class:"card"});
+    const bar=el("div",{class:"progress"});const fill=el("i");bar.append(fill);
+    pr.append(bar);
+    fill.style.width=(i/list.length*100)+"%";
+    pr.append(el("div",{class:"steplabel"},"Question "+(i+1)+" of "+list.length));
+    scr.append(pr);
+    scr.append(readToggle(id));
+
+    const host=el("div",{class:"card"}); scr.append(host);
+    const fb=el("div",{class:"feedback"}); scr.append(fb);
+    setScreen(scr);
+
+    const api={
+      done:(ok)=>{ if(ok){ fill.style.width=((i+1)/list.length*100)+"%"; }
+        afterAnswer(ok,ex,fb,()=>{ i++; next(); }); },
+      wrong:()=>{ wrongTotal++; logWrong(); }
+    };
+    renderExercise(ex,host,api);
+  }
+
+  function afterAnswer(ok,ex,fb,cont){
+    fb.className="feedback show "+(ok?"ok":"no");
+    fb.innerHTML="";
+    fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+    const msg=el("div");
+    msg.innerHTML = ok ? pick(["Great job!","Correct! ⭐","Excellent!","Well done!","That's right!"])
+                       : (ex.explain||"Read the text again carefully.");
+    fb.append(msg);
+    if(ok)Sound.good(); else Sound.wrong();
+    if(ok){
+      fb.append(el("button",{class:"btn green",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");cont();}},"Next →"));
+    }else{
+      fb.append(el("button",{class:"btn blue",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");retry();}},"Try Again →"));
+    }
+    function retry(){
+      const host=fb.previousSibling;
+      host.innerHTML=""; renderExercise(ex,host,{
+        done:(ok2)=>{ afterAnswer(ok2,ex,fb,()=>{i++;next();}); },
+        wrong:()=>{wrongTotal++; logWrong();}
+      });
+    }
+  }
+
+  function finish(){
+    Store.clearProgress();
+    let stars = wrongTotal===0?3 : (wrongTotal<=2?2:1);
+    Store.setStars(id,stars); updTotal();
+    const isMaster = id==="master";
+    const scr=el("div",{class:"result screen"});
+    scr.append(stationHeader(id,"Done!"));
+    const card=el("div",{class:"card center"});
+    card.append(el("div",{class:"huge"}, isMaster?"🏆 CHAMPION! 🏆":"Done! 🎉"));
+    const st=el("div",{class:"bigstars"});
+    for(let k=0;k<3;k++)st.append(el("span",{class:"s"},"★"));
+    card.append(st);
+    card.append(el("p",{class:"big"}, stars===3?"Perfect – you know it all!":stars===2?"Very well done!":"Good job – practice makes perfect!"));
+    if(isMaster){
+      card.append(el("div",{class:"badge"},"🏅"));
+      card.append(el("p",{html:"You are a <b>Needs &amp; Wants Champion</b>! You know exactly what we need and what we want."}));
+    }
+    const nav=el("div",{style:"margin-top:10px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+    nav.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();renderHub();}},"🗺️ To the Map"));
+    nav.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();startStation(id);}},"↻ Try Again"));
+    const idx=STATIONS.findIndex(s=>s.id===id);
+    if(idx<STATIONS.length-1){
+      nav.append(el("button",{class:"btn",onclick:()=>{Sound.click();startStation(STATIONS[idx+1].id);}},"Next Station →"));
+    }
+    card.append(nav);
+    scr.append(card);
+    setScreen(scr);
+    setTimeout(()=>{ const ss=$$(".bigstars .s");
+      for(let k=0;k<stars;k++)setTimeout(()=>{ss[k].classList.add("on");Sound.good();},k*350);
+    },200);
+    if(stars>=3||isMaster){Confetti.burst(isMaster?240:160);Sound.win();}
+    else if(stars===2){Confetti.burst(90);Sound.good();}
+  }
+}
+
+/* =========================================================================
+   EXERCISE RENDERERS  (mc, tf, multi)
+   ========================================================================= */
+function renderExercise(ex,host,api){ (RENDER[ex.type]||RENDER.mc)(ex,host,api); }
+const RENDER={};
+
+RENDER.mc=(ex,host,api)=>{
+  host.append(el("div",{class:"center big",style:"margin-bottom:10px",html:ex.q}));
+  const box=el("div",{class:"center",style:"display:flex;flex-direction:column;gap:10px;align-items:center"});
+  shuffle(ex.options).forEach(o=>{
+    const b=el("button",{class:"btn lg",html:o.label,onclick:()=>{
+      if(o.ok){ b.classList.add("green"); Sound.click(); api.done(true); }
+      else{ b.classList.add("gray"); b.setAttribute("disabled",""); Sound.wrong(); api.wrong(); api.done(false); }
+    }});
+    box.append(b);
+  });
+  host.append(box);
+};
+
+RENDER.tf=(ex,host,api)=>{
+  host.append(el("div",{class:"center big",style:"margin-bottom:12px",html:ex.q}));
+  const box=el("div",{class:"center",style:"display:flex;gap:12px;justify-content:center"});
+  [["👍 True",true],["👎 False",false]].forEach(([lab,val])=>{
+    box.append(el("button",{class:"btn lg "+(val?"green":"blue"),html:lab,onclick:()=>{
+      const ok=(val===ex.answer); Sound.click(); if(!ok)api.wrong(); api.done(ok);
+    }}));
+  });
+  host.append(box);
+};
+
+RENDER.multi=(ex,host,api)=>{
+  host.append(el("div",{class:"center big",style:"margin-bottom:4px",html:ex.q}));
+  host.append(el("div",{class:"center muted",style:"margin-bottom:10px;font-size:.95rem"},"Tick all correct answers:"));
+  const chosen=new Set();
+  const grid=el("div",{class:"mgrid"});
+  ex.options.forEach((o,idx)=>{
+    const chip=el("div",{class:"mchip"});
+    const box=el("span",{class:"box"},"");
+    chip.append(box, el("span",{html:o.label}));
+    chip.addEventListener("click",()=>{ Sound.click();
+      if(chosen.has(idx)){chosen.delete(idx);chip.classList.remove("on");box.textContent="";}
+      else{chosen.add(idx);chip.classList.add("on");box.textContent="✓";}
+    });
+    grid.append(chip);
+  });
+  host.append(grid);
+  host.append(el("div",{class:"center",style:"margin-top:14px"},
+    el("button",{class:"btn green lg",onclick:()=>{
+      const ok = ex.options.every((o,idx)=> (!!o.ok)===chosen.has(idx));
+      if(ok) api.done(true); else { api.wrong(); toast("Not quite right – look again!"); api.done(false); }
+    }},"✓ Done")));
+};
+
+/* =========================================================================
+   CONTENT  – Needs & Wants  (English, Grade 3)
+   ========================================================================= */
+const STATION_DATA={};
+function readingStation(text, exercises){
+  return { text, teach:[{ mascot:"Read the text carefully. You can read it again while answering questions. 🔍",
+    render(b){ b.append(el("div",{class:"passage",html:text})); } }], exercises };
+}
+
+/* 1 – What Are Needs? */
+STATION_DATA.whatneed = readingStation(
+  `<h3>What Are Needs?</h3>
+   A <b>need</b> is something that every person must have to stay alive and healthy.
+   Without needs, people cannot live. The four main needs are: <b>food</b>, <b>water</b>,
+   <b>clothing</b>, and <b>shelter</b> (a home or a place to stay safe).
+   Food gives us energy. Water keeps our body working. Clothing keeps us warm and protected.
+   Shelter keeps us safe from rain, cold, and danger.
+   We do not choose our needs – every person in the world has the same four basic needs.`,
+  [
+    { type:"mc", q:"What is a <b>need</b>?",
+      options:[{label:"Something we must have to stay alive",ok:true},{label:"Something we enjoy but don't have to have",ok:false},{label:"Something we see in a shop",ok:false}],
+      explain:"A <b>need</b> is something every person <b>must have</b> to stay alive and healthy." },
+    { type:"multi", q:"Which of these are the four main <b>needs</b>?",
+      options:[{label:"Food",ok:true},{label:"Water",ok:true},{label:"Clothing",ok:true},{label:"Shelter",ok:true}],
+      explain:"All four – <b>food, water, clothing, and shelter</b> – are the basic needs." },
+    { type:"tf", q:"Without needs, people cannot live.", answer:true,
+      explain:"True – needs are things we <b>must have</b> to survive." },
+    { type:"mc", q:"What does <b>shelter</b> mean?",
+      options:[{label:"A home or safe place to stay",ok:true},{label:"A type of food",ok:false},{label:"A piece of clothing",ok:false}],
+      explain:"<b>Shelter</b> means a home or a place that keeps us safe from rain, cold, and danger." }
+  ]
+);
+
+/* 2 – What Are Wants? */
+STATION_DATA.whatwant = readingStation(
+  `<h3>What Are Wants?</h3>
+   A <b>want</b> is something we would like to have, but we do not need it to stay alive.
+   Wants make life more fun and comfortable, but we can live without them.
+   Examples of wants are: a new toy, a video game, sweets, a bicycle, or a trip to a theme park.
+   People can have different wants. One child may want a doll, while another child wants a football.
+   Wants are not the same for everyone. Needs are the same for everyone.`,
+  [
+    { type:"mc", q:"What is a <b>want</b>?",
+      options:[{label:"Something we like but do not need to survive",ok:true},{label:"Something every person must have",ok:false},{label:"Food or water",ok:false}],
+      explain:"A <b>want</b> is something we'd like to have, but we can live without it." },
+    { type:"tf", q:"Wants are the same for everyone.", answer:false,
+      explain:"False – wants are <b>different</b> for everyone. Needs are the same for everyone." },
+    { type:"multi", q:"Which of these are examples of <b>wants</b>?",
+      options:[{label:"A new toy",ok:true},{label:"A video game",ok:true},{label:"Sweets",ok:true},{label:"Water",ok:false}],
+      explain:"Toys, video games, and sweets are <b>wants</b>. Water is a <b>need</b>." },
+    { type:"mc", q:"Can people live without their wants?",
+      options:[{label:"Yes – wants are not needed to survive",ok:true},{label:"No – wants are very important for life",ok:false},{label:"Only sometimes",ok:false}],
+      explain:"Yes – we can live without wants. They make life more fun, but they are not needed to survive." }
+  ]
+);
+
+/* 3 – The Big Four Needs */
+STATION_DATA.thebigfour = readingStation(
+  `<h3>The Big Four Needs</h3>
+   Let's look more closely at the four basic needs.
+   <br><br>
+   🍞 <b>Food</b> – We need food every day. Food gives our body energy to move, grow, and think.
+   Without food, our body becomes weak.
+   <br><br>
+   💧 <b>Water</b> – Our body is mostly water. We must drink water every day to stay healthy.
+   Without water, a person can only survive for a few days.
+   <br><br>
+   👕 <b>Clothing</b> – We wear clothing to protect our body. Clothes keep us warm in winter and cool in summer.
+   They also protect us from the sun and the rain.
+   <br><br>
+   🏠 <b>Shelter</b> – A shelter is a place to live and feel safe. Houses, flats, and tents can all be shelters.
+   Shelter protects us from cold, heat, and danger.`,
+  [
+    { type:"mc", q:"Why do we need <b>food</b>?",
+      options:[{label:"It gives our body energy to move, grow, and think",ok:true},{label:"It keeps us warm in winter",ok:false},{label:"It gives us a place to sleep",ok:false}],
+      explain:"Food gives our body <b>energy</b> to move, grow, and think." },
+    { type:"mc", q:"What can <b>clothing</b> protect us from?",
+      options:[{label:"Sun and rain",ok:true},{label:"Hunger",ok:false},{label:"Thirst",ok:false}],
+      explain:"Clothes protect us from the <b>sun and the rain</b> and keep us warm or cool." },
+    { type:"tf", q:"Without water, a person can survive for many weeks.", answer:false,
+      explain:"False – without water, a person can only survive for a <b>few days</b>." },
+    { type:"mc", q:"Which of these can be a <b>shelter</b>?",
+      options:[{label:"A tent",ok:true},{label:"A sandwich",ok:false},{label:"A jumper",ok:false}],
+      explain:"A tent, a house, and a flat can all be <b>shelters</b> – places to live and feel safe." }
+  ]
+);
+
+/* 4 – At the Market */
+STATION_DATA.market = readingStation(
+  `<h3>At the Market</h3>
+   Mia and her mum go to the market on Saturday.
+   Mia's mum has a shopping list. On the list are: <b>bread, apples, milk, and rice</b>.
+   These things are needed for the family to eat this week.
+   <br><br>
+   At the market, Mia sees a pretty hair clip, a colouring book, and a bag of sweets.
+   She asks her mum for the sweets.
+   Her mum says: "Sweets are a want. We have everything we need on our list. Today we buy our needs first."
+   Mia understands. She will ask for sweets another day as a treat.`,
+  [
+    { type:"mc", q:"Why does Mia's mum have a shopping list?",
+      options:[{label:"To buy what the family needs for the week",ok:true},{label:"To buy sweets and toys",ok:false},{label:"To write down her wants",ok:false}],
+      explain:"The list has things the family <b>needs</b> to eat that week: bread, apples, milk, and rice." },
+    { type:"multi", q:"Which items are on Mia's mum's shopping list (needs)?",
+      options:[{label:"Bread",ok:true},{label:"Milk",ok:true},{label:"Sweets",ok:false},{label:"Apples",ok:true}],
+      explain:"<b>Bread, milk, and apples</b> are on the needs list. Sweets are a want." },
+    { type:"tf", q:"Sweets are a need.", answer:false,
+      explain:"False – sweets are a <b>want</b>. They are nice to have, but not needed to stay healthy." },
+    { type:"mc", q:"What does Mia decide to do?",
+      options:[{label:"Wait and ask for sweets another day",ok:true},{label:"Cry until she gets the sweets",ok:false},{label:"Buy the sweets herself",ok:false}],
+      explain:"Mia <b>understands</b> and decides she will ask for sweets another day as a treat." }
+  ]
+);
+
+/* 5 – Emma's Week */
+STATION_DATA.emmastory = readingStation(
+  `<h3>Emma's Week</h3>
+   Emma is 9 years old. Here is a look at her week.
+   <br><br>
+   On Monday, Emma's mum buys her a new winter coat because her old one is too small.
+   The coat is a <span class="tag-need">NEED</span> – she must stay warm.
+   <br><br>
+   On Wednesday, Emma asks for a new video game. Her dad says they will think about it for her birthday.
+   The video game is a <span class="tag-want">WANT</span> – it is fun but not needed to live.
+   <br><br>
+   On Friday, Emma's family buys food and water for the week at the supermarket.
+   Food and water are <span class="tag-need">NEEDS</span>.
+   <br><br>
+   On Sunday, Emma sees a beautiful doll at the toy shop. She thinks: "I want it, but I don't need it."
+   She is learning the difference between needs and wants!`,
+  [
+    { type:"mc", q:"Why did Emma's mum buy a new winter coat?",
+      options:[{label:"Her old coat was too small and she needed to stay warm",ok:true},{label:"Emma just wanted a new one",ok:false},{label:"The old coat was a want",ok:false}],
+      explain:"Emma's old coat was too small – she <b>needed</b> to stay warm, so the coat was a need." },
+    { type:"mc", q:"Is the video game a need or a want?",
+      options:[{label:"A want – it is fun but not needed to survive",ok:true},{label:"A need – everyone must have one",ok:false},{label:"A need – it keeps Emma healthy",ok:false}],
+      explain:"The video game is a <b>want</b> – it is fun, but Emma can live without it." },
+    { type:"multi", q:"Which of these are <b>needs</b> in Emma's week?",
+      options:[{label:"The winter coat",ok:true},{label:"Food and water from the supermarket",ok:true},{label:"The video game",ok:false},{label:"The doll",ok:false}],
+      explain:"The <b>coat</b> (warmth/clothing) and <b>food and water</b> are needs. The video game and doll are wants." },
+    { type:"tf", q:"Emma thinks the doll is a want, not a need.", answer:true,
+      explain:"True – Emma says: <b>\"I want it, but I don't need it.\"</b> She knows it is a want." }
+  ]
+);
+
+/* 6 – Needs vs. Wants (comparison) */
+STATION_DATA.compare = readingStation(
+  `<h3>Needs vs. Wants</h3>
+   It is easy to mix up needs and wants. Here is how to tell them apart:
+   <br><br>
+   Ask yourself: <b>"Can I stay alive and healthy without it?"</b>
+   <ul style="text-align:left;margin:8px 0 0 16px;line-height:1.9">
+     <li>If the answer is <b>NO</b> – it is a <span class="tag-need">NEED</span>. (Example: water, food, a warm coat)</li>
+     <li>If the answer is <b>YES</b> – it is a <span class="tag-want">WANT</span>. (Example: a toy, sweets, a new phone)</li>
+   </ul>
+   <br>
+   Remember: Needs come first! When a family has enough money for their needs, they can then think about wants.
+   It is smart to know the difference so that we use our money wisely.`,
+  [
+    { type:"mc", q:"What question can you ask to tell the difference between a need and a want?",
+      options:[{label:"Can I stay alive and healthy without it?",ok:true},{label:"Is it expensive?",ok:false},{label:"Do my friends have it?",ok:false}],
+      explain:"Ask: <b>\"Can I stay alive and healthy without it?\"</b> If no → need. If yes → want." },
+    { type:"mc", q:"You are cold in winter and need something to wear. Is this a need or a want?",
+      options:[{label:"A need – clothing keeps us warm and healthy",ok:true},{label:"A want – we just like new clothes",ok:false},{label:"Neither",ok:false}],
+      explain:"Clothing that keeps us warm is a <b>need</b> – we need it to stay healthy." },
+    { type:"tf", q:"A new phone is a need.", answer:false,
+      explain:"False – a new phone is a <b>want</b>. People can stay alive and healthy without one." },
+    { type:"mc", q:"What should a family buy first?",
+      options:[{label:"Their needs",ok:true},{label:"Their wants",ok:false},{label:"The most expensive things",ok:false}],
+      explain:"<b>Needs come first!</b> A family should always make sure they have food, water, clothing, and shelter before buying wants." }
+  ]
+);
+
+/* 7 – Champion Master Quiz */
+STATION_DATA.master={
+  text:`<h3>Champion Quiz</h3>Questions from all stations. If you are not sure, think carefully about what you have learned. Good luck, Champion! 🏆`,
+  teach:[{ mascot:"Time for the big <b>Champion Quiz</b>! Questions from everything we have learned about needs and wants. You can do it! 🏆",
+    mood:"cheer",
+    render(b){ b.append(el("h2",{class:"center"},"🏆 Champion Quiz 🏆"));
+      b.append(el("div",{class:"center big"},"Are you ready? Let's go!")); } }],
+  exercises:[
+    { type:"mc", q:"① Which of these is a <b>need</b>?",
+      options:[{label:"Drinking water",ok:true},{label:"A new bicycle",ok:false},{label:"A video game",ok:false}],
+      explain:"<b>Drinking water</b> is a need – our body must have water every day to survive." },
+    { type:"mc", q:"② Which of these is a <b>want</b>?",
+      options:[{label:"A bag of sweets",ok:true},{label:"A winter coat to stay warm",ok:false},{label:"Food for dinner",ok:false}],
+      explain:"<b>Sweets</b> are a want – they are nice to have but not needed to stay alive." },
+    { type:"multi", q:"③ What are the four basic <b>needs</b> every person has?",
+      options:[{label:"Food",ok:true},{label:"Water",ok:true},{label:"Clothing",ok:true},{label:"Shelter",ok:true}],
+      explain:"All four – <b>food, water, clothing, and shelter</b> – are the four basic needs." },
+    { type:"tf", q:"④ Wants are the same for every person in the world.", answer:false,
+      explain:"False – wants are <b>different</b> for everyone. Needs are the same for everyone." },
+    { type:"mc", q:"⑤ Emma's mum buys bread and milk at the market. These are ...",
+      options:[{label:"Needs – food for the family",ok:true},{label:"Wants – just for fun",ok:false},{label:"Neither needs nor wants",ok:false}],
+      explain:"Bread and milk are <b>food</b> – they are needs because the family must eat." },
+    { type:"mc", q:"⑥ How can you tell if something is a need or a want?",
+      options:[{label:"Ask: Can I stay alive and healthy without it?",ok:true},{label:"Ask: Is it on TV?",ok:false},{label:"Ask: Do I feel happy when I see it?",ok:false}],
+      explain:"Ask: <b>\"Can I stay alive and healthy without it?\"</b> No → need. Yes → want." },
+    { type:"multi", q:"⑦ Which of these would you call <b>wants</b>?",
+      options:[{label:"A new toy",ok:true},{label:"A colouring book",ok:true},{label:"Sweets",ok:true},{label:"Water",ok:false}],
+      explain:"Toys, colouring books, and sweets are all <b>wants</b>. Water is always a need." }
+  ]
+};
+
+/* ---- Route -------------------------------------------------------------- */
+function routeStart(){
+  updTotal();
+  const r=Store.getProgress();
+  if(r && STATION_DATA[r.id]) startStation(r.id,r);
+  else renderHub();
+}
+
+/* ---- Sound button ------------------------------------------------------- */
+$("#soundBtn").addEventListener("click",function(){
+  const on=!Sound.get();Sound.set(on);this.textContent=on?"🔊":"🔇";if(on)Sound.click();
+});
+
+/* ---- Practice mode from parent report ----------------------------------- */
+const TOPIC_ID="needs-wants";
+let practiceTimer=null;
+function runPractice(stationId, exi){
+  clearTimeout(practiceTimer);
+  const data=STATION_DATA[stationId];
+  const ex = data && data.exercises && data.exercises[+exi];
+  const back=()=>{ clearTimeout(practiceTimer); location.href="../../index.html#report"; };
+  if(!ex){ back(); return; }
+  function goNext(){
+    clearTimeout(practiceTimer);
+    const open=SchoolCloud.openQuestions();
+    if(open.length===0){ back(); return; }
+    const nx=open.filter(q=>q.topic===TOPIC_ID)[0]||open[0];
+    if(nx.topic===TOPIC_ID) runPractice(nx.station, nx.exi);
+    else location.href="../"+nx.topic+"/index.html#practice="+encodeURIComponent(nx.station+":"+nx.exi);
+  }
+  const scr=el("div",{class:"screen"});
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",onclick:back},"← Report"));
+  bar.append(el("div",{class:"brand"},el("span",{},"🔁 Practice")));
+  const openNow=SchoolCloud.openQuestions().length;
+  bar.append(el("div",{class:"steplabel"}, openNow>1 ? (openNow+" still open") : ((STATIONS.find(s=>s.id===stationId)||{}).n||"")));
+  scr.append(bar);
+  scr.append(mascotRow("Read carefully and find the right answer! 🔍","think"));
+  scr.append(readToggle(stationId));
+  const host=el("div",{class:"card"}); scr.append(host);
+  const fb=el("div",{class:"feedback"}); scr.append(fb);
+  setScreen(scr);
+  render();
+  function render(){
+    host.innerHTML="";
+    renderExercise(ex, host, {
+      done:(ok)=>{
+        fb.className="feedback show "+(ok?"ok":"no"); fb.innerHTML="";
+        fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+        const msg=el("div"); msg.innerHTML = ok ? "Correct! Well done! ⭐" : (ex.explain||"Read the text again carefully."); fb.append(msg);
+        if(ok){ Sound.good(); Store.clearStat(stationId, exi);
+          const more = SchoolCloud.openQuestions().length>0;
+          fb.append(el("button",{class:"btn green",style:"margin-left:auto",onclick:goNext}, more?"Next →":"✓ Done – back to Report"));
+          practiceTimer=setTimeout(goNext, 1500);
+        } else { Sound.wrong();
+          fb.append(el("button",{class:"btn blue",style:"margin-left:auto",onclick:()=>{fb.classList.remove("show"); render();}},"Try Again →"));
+        }
+      },
+      wrong:()=>{}
+    });
+  }
+}
+
+/* ---- Start -------------------------------------------------------------- */
+function startHere(){
+  const m=/^#practice=([^:]+):(\d+)$/.exec(decodeURIComponent(location.hash||""));
+  if(m){ history.replaceState(null,"",location.pathname); runPractice(m[1], m[2]); return; }
+  routeStart();
+}
+SchoolCloud.bootSync(startHere);
+
+/* PWA */
+if("serviceWorker" in navigator){ window.addEventListener("load",()=>navigator.serviceWorker.register("../../sw.js").catch(()=>{})); }
+
+/* decorative clouds */
+(function clouds(){const b=document.body;for(let i=0;i<4;i++){const c=el("div",{class:"cloud"});
+  c.style.top=(8+i*16)+"%";c.style.width=(60+rnd(0,60))+"px";c.style.height=(20+rnd(0,14))+"px";
+  c.style.animationDuration=(40+rnd(0,40))+"s";c.style.animationDelay=(-rnd(0,40))+"s";b.append(c);}})();
+</script>
+</body>
+</html>
