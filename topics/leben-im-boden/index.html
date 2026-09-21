@@ -479,16 +479,17 @@ STATION_DATA.lebensweise = readingStation(
   `<h3>Warum meidet der Regenwurm das Licht?</h3>Der Regenwurm meidet das Tageslicht. Nur in der Dämmerung
    oder nachts kommt er an die Erdoberfläche. Dabei zieht er Laub in seine Gänge. Bakterien zersetzen das
    Laub, sodass der Regenwurm es dann fressen kann. Wenn es stärker regnet, bewegt sich der Regenwurm ebenfalls
-   an die Erdoberfläche. Der Regenwurm atmet nämlich über seine Haut – wenn seine Gänge voller Wasser sind,
-   bekommt er sonst keine Luft mehr.`,
+   an die Erdoberfläche. Außerdem atmet der Regenwurm über seine Haut.`,
   [
     { type:"tf", q:"Der Regenwurm atmet über die Haut.", answer:true,
       explain:"Richtig – der Regenwurm atmet über seine <b>Haut</b>." },
     { type:"mc", q:"Wann kommt der Regenwurm meistens an die Erdoberfläche?",
       options:[{label:"In der Dämmerung oder nachts",ok:true},{label:"Am hellen Mittag",ok:false},{label:"Nie",ok:false}],
       explain:"Der Regenwurm meidet das Tageslicht und kommt in der <b>Dämmerung oder nachts</b>." },
+    { type:"tf", q:"Bakterien zersetzen das Laub, das der Regenwurm frisst.", answer:true,
+      explain:"Richtig – erst wenn Bakterien das Laub zersetzt haben, kann der Regenwurm es fressen." },
     { type:"tf", q:"Bei stärkerem Regen kriecht der Regenwurm in tiefere Erdschichten.", answer:false,
-      explain:"Falsch – er kommt an die <b>Erdoberfläche</b>, weil er über die Haut atmet." },
+      explain:"Falsch – bei stärkerem Regen bewegt sich der Regenwurm an die <b>Erdoberfläche</b>." },
     { type:"mc", q:"Was zieht der Regenwurm nachts in seine Gänge?",
       options:[{label:"Laub",ok:true},{label:"Steine",ok:false},{label:"Sand",ok:false}],
       explain:"Er zieht <b>Laub</b> in seine Gänge, das Bakterien zersetzen." }
@@ -556,7 +557,7 @@ STATION_DATA["boden-meister"]={
       options:[{label:"Assel",ok:true},{label:"Milbe",ok:true},{label:"Regenwurm",ok:true},{label:"Delfin",ok:false}],
       explain:"Assel, Milbe und Regenwurm leben im Boden – der Delfin lebt im Meer." },
     { type:"tf", q:"⑥ Bei starkem Regen kommt der Regenwurm an die Erdoberfläche.", answer:true,
-      explain:"Richtig – sonst bekommt er in seinen vollgelaufenen Gängen keine Luft mehr." }
+      explain:"Richtig – bei starkem Regen bewegt sich der Regenwurm an die Erdoberfläche." }
   ]
 };
 
