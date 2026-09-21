@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Boden-Forscher 🪱 – Leben im Boden</title>
+<link rel="stylesheet" href="../../shared/styles.css">
+<link rel="manifest" href="../../manifest.webmanifest">
+<meta name="theme-color" content="#7ec8ff">
+<link rel="apple-touch-icon" href="../../icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Lernportal">
+<style>
+.emoji-mascot{display:flex;align-items:center;justify-content:center;font-size:60px;
+  background:#eef4ff;border-radius:50%;box-shadow:var(--shadow-s)}
+.passage{font-size:1.08rem;line-height:1.75;text-align:left;color:var(--ink)}
+.passage h3{margin:.1em 0 .4em;color:var(--brand-d)}
+.readtoggle{margin:0 0 10px}
+.mchip{display:inline-flex;align-items:center;gap:6px;background:#fff;border:2px solid var(--sky-1);
+  border-radius:14px;padding:10px 16px;font-weight:700;font-size:1.03rem;cursor:pointer;
+  box-shadow:var(--shadow-s);transition:transform .1s}
+.mchip:active{transform:scale(.96)}
+.mchip.on{border-color:var(--green);background:#e6faf0}
+.mchip .box{width:20px;height:20px;border-radius:6px;border:2px solid var(--sky-1);display:inline-block;text-align:center;line-height:18px}
+.mchip.on .box{background:var(--green);border-color:var(--green);color:#fff}
+.mgrid{display:flex;flex-direction:column;gap:10px;align-items:stretch;max-width:420px;margin:0 auto}
+</style>
+</head>
+<body>
+<canvas id="confetti"></canvas>
+
+<div id="app">
+  <div class="topbar">
+    <div class="brand"><span class="logo">🪱</span><span>Boden-Forscher</span></div>
+    <div class="score"><span class="star">★</span><span id="totalStars">0</span></div>
+    <button class="iconbtn" id="soundBtn" title="Ton an/aus">🔊</button>
+  </div>
+  <div id="screen"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="../../shared/config.js"></script>
+<script src="../../shared/cloud.js"></script>
+<script>
+"use strict";
+
+/* ---- kleine Helfer ------------------------------------------------------ */
+const $  = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
+function el(tag, attrs={}, ...kids){
+  const n=document.createElement(tag);
+  for(const k in attrs){
+    if(k==="class") n.className=attrs[k];
+    else if(k==="html") n.innerHTML=attrs[k];
+    else if(k.startsWith("on")&&typeof attrs[k]==="function") n.addEventListener(k.slice(2),attrs[k]);
+    else if(attrs[k]!=null) n.setAttribute(k,attrs[k]);
+  }
+  for(const c of kids){ if(c==null) continue; n.append(c.nodeType?c:document.createTextNode(c)); }
+  return n;
+}
+const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=rnd(0,i);[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+/* ---- Ton (WebAudio) ---------------------------------------------------- */
+const Sound=(()=>{
+  let ctx=null, on=true;
+  function ac(){ if(!ctx) ctx=new (window.AudioContext||window.webkitAudioContext)();
+    if(ctx.state==="suspended"){ ctx.resume(); } return ctx; }
+  ["pointerdown","touchstart","keydown","click"].forEach(ev=>
+    window.addEventListener(ev,()=>{ try{ ac(); }catch(e){} },{passive:true}));
+  function tone(f,t,dur,type="sine",vol=.18){
+    if(!on) return; const c=ac(); const o=c.createOscillator(),g=c.createGain();
+    o.type=type;o.frequency.setValueAtTime(f,t);o.connect(g);g.connect(c.destination);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.01);
+    g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.start(t);o.stop(t+dur);
+  }
+  return {
+    set(v){on=v;}, get(){return on;},
+    click(){if(!on)return;const t=ac().currentTime;tone(440,t,.07,"triangle",.12);},
+    good(){if(!on)return;const t=ac().currentTime;[523,659,784].forEach((f,i)=>tone(f,t+i*.09,.18,"sine",.16));},
+    wrong(){if(!on)return;const t=ac().currentTime;tone(280,t,.18,"sawtooth",.1);tone(200,t+.12,.22,"sawtooth",.1);},
+    win(){if(!on)return;const t=ac().currentTime;[523,587,659,784,880,1046].forEach((f,i)=>tone(f,t+i*.12,.3,"triangle",.16));}
+  };
+})();
+
+/* ---- Konfetti ---------------------------------------------------------- */
+const Confetti=(()=>{
+  const cv=$("#confetti"),cx=cv.getContext("2d");let parts=[],raf=null;
+  function size(){cv.width=innerWidth;cv.height=innerHeight;}
+  addEventListener("resize",size);
+  const COL=["#ff7a59","#ffd23f","#36c98d","#3aa0ff","#9b6bff","#ff79c6"];
+  function burst(n=160){
+    size();cv.style.display="block";
+    for(let i=0;i<n;i++)parts.push({x:innerWidth/2+rnd(-60,60),y:innerHeight/3,
+      vx:rnd(-90,90)/10,vy:rnd(-150,-40)/10,g:.18+Math.random()*.12,
+      s:rnd(6,13),c:pick(COL),r:Math.random()*6,vr:(Math.random()-.5)*.5,life:rnd(80,140)});
+    if(!raf)loop();
+  }
+  function loop(){
+    cx.clearRect(0,0,cv.width,cv.height);
+    parts.forEach(p=>{p.vy+=p.g;p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;p.life--;
+      cx.save();cx.translate(p.x,p.y);cx.rotate(p.r);cx.fillStyle=p.c;
+      cx.fillRect(-p.s/2,-p.s/2,p.s,p.s*.6);cx.restore();});
+    parts=parts.filter(p=>p.life>0&&p.y<cv.height+30);
+    if(parts.length)raf=requestAnimationFrame(loop);
+    else{raf=null;cv.style.display="none";}
+  }
+  return {burst};
+})();
+
+const toast=SchoolCloud.toast;
+
+/* ---- Speicher: gemeinsamer Cloud-/Fortschritt-Store -------------------- */
+const Store = SchoolCloud.store("leben-im-boden");
+const Cloud = { ready: SchoolCloud.ready };
+function renderCodeScreen(firstRun){ SchoolCloud.showCodeScreen(firstRun, routeStart); }
+
+/* ---- Maskottchen: "Wurmi der Regenwurm" -------------------------------- */
+function mascotRow(text,mood="happy"){
+  const row=el("div",{class:"mascot-row"});
+  const face = mood==="cheer"?"🪱🎉":mood==="think"?"🪱🔍":"🪱";
+  row.append(el("div",{class:"mascot emoji-mascot"},face));
+  row.append(el("div",{class:"bubble",html:text}));
+  return row;
+}
+
+/* ---- Bildschirm-Helfer ------------------------------------------------- */
+function setScreen(node){const s=$("#screen");s.innerHTML="";s.append(node);window.scrollTo(0,0);}
+function updTotal(){const e=$("#totalStars");if(e)e.textContent=Store.total();}
+
+/* ---- Ausklappbarer Text (zum Nachlesen bei den Fragen) ----------------- */
+function readToggle(stationId){
+  const st=STATION_DATA[stationId];
+  const wrap=el("div",{class:"readtoggle center"});
+  if(!st||!st.text) return wrap;
+  const btn=el("button",{class:"btn blue",style:"font-size:1rem;padding:8px 16px"},"📖 Text nachlesen");
+  const box=el("div",{class:"card passage",style:"display:none;margin-top:8px",html:st.text});
+  btn.addEventListener("click",()=>{Sound.click();
+    const show=box.style.display==="none";
+    box.style.display=show?"block":"none";
+    btn.textContent=show?"📖 Text zuklappen":"📖 Text nachlesen";
+  });
+  wrap.append(btn,box);
+  return wrap;
+}
+
+/* =========================================================================
+   STATIONEN  (jede Station = ein Sachtext mit Fragen zum Thema "Leben im Boden")
+   ========================================================================= */
+const STATIONS=[
+  {id:"bodentiere",   n:"Wer lebt im Boden?", e:"🐌", c:"--green"},
+  {id:"koerperbau",   n:"Körperbau des Regenwurms", e:"🪱", c:"--pink"},
+  {id:"bewegung",     n:"Fortbewegung & Ernährung", e:"🌱", c:"--brand"},
+  {id:"lebensweise",  n:"Warum meidet er das Licht?", e:"🌙", c:"--purple"},
+  {id:"gaertner",     n:"Gärtner der Erde", e:"🌍", c:"--blue"},
+  {id:"beobachten",   n:"Regenwürmer beobachten", e:"🔍", c:"--yellow"},
+  {id:"boden-meister",n:"Boden-Meister", e:"🏆", c:"--gold", master:true}
+];
+
+/* ---- Stationskarte ----------------------------------------------------- */
+function renderHub(){
+  updTotal();
+  const wrap=el("div",{class:"screen"});
+  wrap.append(el("h1",{class:"hub-title"},"🪱 Boden-Forscher"));
+  wrap.append(el("div",{class:"hub-sub"},"Entdecke das Leben im Boden und den Regenwurm!"));
+  wrap.append(mascotRow("Hallo! Ich bin <b>Wurmi der Regenwurm</b> 🪱. Zusammen erforschen wir, wer alles im Boden lebt – und warum ich der <b>Gärtner der Erde</b> bin! 🌍"));
+
+  const prog=Store.getProgress();
+  if(prog && STATION_DATA[prog.id]){
+    const ps=STATIONS.find(x=>x.id===prog.id);
+    const cont=el("div",{class:"center",style:"margin:2px 0 12px"});
+    cont.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();startStation(prog.id,prog);}},
+      "▶ Weitermachen: "+(ps?ps.n:"")+" – Aufgabe "+((prog.i||0)+1)));
+    wrap.append(cont);
+  }
+
+  const grid=el("div",{class:"stations"});
+  let prevDone=true;
+  STATIONS.forEach((s,i)=>{
+    const stars=Store.stars(s.id), done=Store.data.done[s.id];
+    const locked = !prevDone && !done;
+    const card=el("div",{class:"station"+(s.master?" master":"")+(done?" done":"")+(locked?" locked":"")});
+    card.style.borderColor = done? "var(--gold)":"transparent";
+    card.append(el("span",{class:"num"},String(i+1)));
+    card.append(el("span",{class:"emoji"},s.e));
+    card.append(el("div",{class:"nm"},s.n));
+    const sd=el("div",{class:"stars"});
+    for(let k=0;k<3;k++)sd.append(el("span",{class:"s"+(k<stars?" on":"")},"★"));
+    card.append(sd);
+    if(!locked) card.addEventListener("click",()=>{Sound.click();startStation(s.id);});
+    grid.append(card);
+    prevDone = done;
+  });
+  wrap.append(grid);
+
+  const foot=el("div",{class:"center",style:"margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  foot.append(el("button",{class:"btn gray",onclick:()=>{location.href="../../index.html";}},"← Themen"));
+  foot.append(el("button",{class:"btn gray",onclick:()=>{
+      if(confirm("Fortschritt in diesem Thema zurücksetzen?")){Store.reset();renderHub();}
+    }},"↺ Neu starten"));
+  if(Cloud.ready()){
+    foot.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();renderCodeScreen(false);}},
+      "☁️ Code: "+(SchoolCloud.code()||"—")));
+  }
+  wrap.append(foot);
+  setScreen(wrap);
+}
+
+function stationHeader(id,step){
+  const s=STATIONS.find(x=>x.id===id);
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",
+    onclick:()=>{Sound.click();renderHub();}},"← Karte"));
+  bar.append(el("div",{class:"brand"},el("span",{},s.e+" "+s.n)));
+  bar.append(el("div",{class:"steplabel"},step||""));
+  return bar;
+}
+
+/* ---- Station-Ablauf: Text lesen -> Fragen ------------------------------ */
+function startStation(id,resume){
+  const data=STATION_DATA[id];
+  if(!data){toast("Diese Station wird noch gebaut …");return;}
+  const teach=data.teach||[];
+  const exercises=data.exercises||[];
+  let ti=0;
+  if(resume){ runExercises(id,exercises,resume); return; }
+  if(teach.length) showTeach(); else runExercises(id,exercises);
+
+  function showTeach(){
+    const card=teach[ti];
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id,"Lesen "+(ti+1)+"/"+teach.length));
+    const body=el("div",{class:"card"});
+    if(card.render){ card.render(body); }
+    else {
+      if(card.title) body.append(el("h2",{class:"center"},card.title));
+      if(card.html)  body.append(el("div",{class:"passage",html:card.html}));
+    }
+    scr.append(card.mascot? mascotRow(card.mascot,card.mood||"happy"):document.createTextNode(""));
+    scr.append(body);
+    const nav=el("div",{class:"center",style:"margin-top:8px"});
+    nav.append(el("button",{class:"btn lg green",onclick:()=>{
+      Sound.click(); ti++;
+      if(ti<teach.length) showTeach(); else runExercises(id,exercises);
+    }}, ti<teach.length-1?"Weiter →":"Los, Fragen! 🔍"));
+    scr.append(nav);
+    setScreen(scr);
+  }
+}
+
+/* ---- Übungs-Engine ----------------------------------------------------- */
+function runExercises(id,list,resume){
+  let i=resume && resume.i<list.length ? resume.i : 0,
+      wrongTotal=resume ? resume.wrongTotal||0 : 0;
+  const stName=()=>(STATIONS.find(s=>s.id===id)||{}).n;
+  const exLbl=()=>list[i] ? (list[i].q||("Frage "+(i+1))) : "";
+  const logWrong=()=>Store.recordWrong(id,i,exLbl(),stName());
+  next();
+
+  function next(){
+    if(i>=list.length){ return finish(); }
+    Store.saveProgress({id, i, wrongTotal});
+    const ex=list[i];
+    Store.recordSeen(id,i,exLbl(),stName());
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id));
+    const pr=el("div",{class:"card"});
+    const bar=el("div",{class:"progress"});const fill=el("i");bar.append(fill);
+    pr.append(bar);
+    fill.style.width=(i/list.length*100)+"%";
+    pr.append(el("div",{class:"steplabel"},"Frage "+(i+1)+" von "+list.length));
+    scr.append(pr);
+    scr.append(readToggle(id));                 // Text zum Nachlesen
+
+    const host=el("div",{class:"card"});
+    scr.append(host);
+    const fb=el("div",{class:"feedback"});scr.append(fb);
+    setScreen(scr);
+
+    const api={
+      done:(ok)=>{ if(ok){ fill.style.width=((i+1)/list.length*100)+"%"; }
+        afterAnswer(ok,ex,fb,()=>{ i++; next(); }); },
+      wrong:()=>{ wrongTotal++; logWrong(); }
+    };
+    renderExercise(ex,host,api);
+  }
+
+  function afterAnswer(ok,ex,fb,cont){
+    fb.className="feedback show "+(ok?"ok":"no");
+    fb.innerHTML="";
+    fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+    const msg=el("div");
+    msg.innerHTML = ok ? pick(["Super erforscht!","Richtig! ⭐","Klasse!","Genau!","Toll gemacht!"])
+                       : (ex.explain||"Lies den Text noch einmal genau.");
+    fb.append(msg);
+    if(ok)Sound.good(); else Sound.wrong();
+    if(ok){
+      fb.append(el("button",{class:"btn green",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");cont();}},"Weiter →"));
+    }else{
+      fb.append(el("button",{class:"btn blue",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");retry();}},"Nochmal →"));
+    }
+    function retry(){
+      const host=fb.previousSibling;
+      host.innerHTML=""; renderExercise(ex,host,{
+        done:(ok2)=>{ afterAnswer(ok2,ex,fb,()=>{i++;next();}); },
+        wrong:()=>{wrongTotal++; logWrong();}
+      });
+    }
+  }
+
+  function finish(){
+    Store.clearProgress();
+    let stars = wrongTotal===0?3 : (wrongTotal<=2?2:1);
+    Store.setStars(id,stars); updTotal();
+    const isMaster = id==="boden-meister";
+    const scr=el("div",{class:"result screen"});
+    scr.append(stationHeader(id,"Geschafft!"));
+    const card=el("div",{class:"card center"});
+    card.append(el("div",{class:"huge"}, isMaster?"🏆 BODEN-MEISTER! 🏆":"Geschafft! 🎉"));
+    const st=el("div",{class:"bigstars"});
+    for(let k=0;k<3;k++)st.append(el("span",{class:"s"},"★"));
+    card.append(st);
+    card.append(el("p",{class:"big"}, stars===3?"Perfekt – alles verstanden!":stars===2?"Sehr gut geforscht!":"Geschafft – Übung macht den Meister!"));
+    if(isMaster){
+      card.append(el("div",{class:"badge"},"🏅"));
+      card.append(el("p",{html:"Du bist ein echter <b>Boden-Forscher</b>! Du weißt genau, wer im Boden lebt und warum der Regenwurm so wichtig ist."}));
+    }
+    const nav=el("div",{style:"margin-top:10px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+    nav.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();renderHub();}},"🗺️ Zur Karte"));
+    nav.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();startStation(id);}},"↻ Nochmal"));
+    const idx=STATIONS.findIndex(s=>s.id===id);
+    if(idx<STATIONS.length-1){
+      nav.append(el("button",{class:"btn",onclick:()=>{Sound.click();startStation(STATIONS[idx+1].id);}},"Nächste Station →"));
+    }
+    card.append(nav);
+    scr.append(card);
+    setScreen(scr);
+    setTimeout(()=>{ const ss=$$(".bigstars .s");
+      for(let k=0;k<stars;k++)setTimeout(()=>{ss[k].classList.add("on");Sound.good();},k*350);
+    },200);
+    if(stars>=3||isMaster){Confetti.burst(isMaster?240:160);Sound.win();}
+    else if(stars===2){Confetti.burst(90);Sound.good();}
+  }
+}
+
+/* =========================================================================
+   ÜBUNGS-RENDERER  (mc, tf, multi)
+   ========================================================================= */
+function renderExercise(ex,host,api){ (RENDER[ex.type]||RENDER.mc)(ex,host,api); }
+const RENDER={};
+
+RENDER.mc=(ex,host,api)=>{
+  host.append(el("div",{class:"center big",style:"margin-bottom:10px",html:ex.q}));
+  const box=el("div",{class:"center",style:"display:flex;flex-direction:column;gap:10px;align-items:center"});
+  shuffle(ex.options).forEach(o=>{
+    const b=el("button",{class:"btn lg",html:o.label,onclick:()=>{
+      if(o.ok){ b.classList.add("green"); Sound.click(); api.done(true); }
+      else{ b.classList.add("gray"); b.setAttribute("disabled",""); Sound.wrong(); api.wrong(); api.done(false); }
+    }});
+    box.append(b);
+  });
+  host.append(box);
+};
+
+RENDER.tf=(ex,host,api)=>{
+  host.append(el("div",{class:"center big",style:"margin-bottom:12px",html:ex.q}));
+  const box=el("div",{class:"center",style:"display:flex;gap:12px;justify-content:center"});
+  [["👍 Richtig",true],["👎 Falsch",false]].forEach(([lab,val])=>{
+    box.append(el("button",{class:"btn lg "+(val?"green":"blue"),html:lab,onclick:()=>{
+      const ok=(val===ex.answer); Sound.click(); if(!ok)api.wrong(); api.done(ok);
+    }}));
+  });
+  host.append(box);
+};
+
+RENDER.multi=(ex,host,api)=>{
+  host.append(el("div",{class:"center big",style:"margin-bottom:4px",html:ex.q}));
+  host.append(el("div",{class:"center muted",style:"margin-bottom:10px;font-size:.95rem"},"Kreuze alle richtigen an:"));
+  const chosen=new Set();
+  const grid=el("div",{class:"mgrid"});
+  ex.options.forEach((o,idx)=>{
+    const chip=el("div",{class:"mchip"});
+    const box=el("span",{class:"box"},"");
+    chip.append(box, el("span",{html:o.label}));
+    chip.addEventListener("click",()=>{ Sound.click();
+      if(chosen.has(idx)){chosen.delete(idx);chip.classList.remove("on");box.textContent="";}
+      else{chosen.add(idx);chip.classList.add("on");box.textContent="✓";}
+    });
+    grid.append(chip);
+  });
+  host.append(grid);
+  host.append(el("div",{class:"center",style:"margin-top:14px"},
+    el("button",{class:"btn green lg",onclick:()=>{
+      const ok = ex.options.every((o,idx)=> (!!o.ok)===chosen.has(idx));
+      if(ok) api.done(true); else { api.wrong(); toast("Noch nicht ganz – schau nochmal genau!"); api.done(false); }
+    }},"✓ Fertig")));
+};
+
+/* =========================================================================
+   INHALTE  (Sachtexte für die 3. Klasse zum Thema "Leben im Boden")
+   ========================================================================= */
+const STATION_DATA={};
+function readingStation(text, exercises){
+  return { text, teach:[{ mascot:"Lies den Text in Ruhe durch. Beim Beantworten kannst du ihn jederzeit nachlesen. 🔍",
+    render(b){ b.append(el("div",{class:"passage",html:text})); } }], exercises };
+}
+
+STATION_DATA.bodentiere = readingStation(
+  `<h3>Wer lebt im Boden?</h3>Im Boden leben ganz viele verschiedene Lebewesen. Manche sind winzig klein und
+   nur mit einer Lupe oder einem Mikroskop zu erkennen, zum Beispiel Bakterien und Pilze. Auch kleine Tiere wie
+   die Milbe, der Springschwanz, die Assel und Fadenwürmer leben im Boden. Größere Tiere wie der Regenwurm, die
+   Maus und der Maulwurf haben den Boden ebenfalls als Zuhause. Alle diese Lebewesen sorgen gemeinsam für einen
+   besseren Boden: Sie helfen, Reste von Pflanzen und Tieren zu zerkleinern und abzubauen. Dabei entsteht
+   nährstoffreiche Erde, in der Pflanzen gut wachsen können.`,
+  [
+    { type:"mc", q:"Womit kann man die winzig kleinen Lebewesen im Boden erkennen?",
+      options:[{label:"Mit einer Lupe oder einem Mikroskop",ok:true},{label:"Mit bloßem Auge ganz leicht",ok:false},{label:"Gar nicht erkennen",ok:false}],
+      explain:"Die kleinsten Lebewesen wie Bakterien und Pilze sieht man nur mit <b>Lupe oder Mikroskop</b>." },
+    { type:"multi", q:"Welche Tiere leben im Boden?",
+      options:[{label:"Regenwurm",ok:true},{label:"Assel",ok:true},{label:"Milbe",ok:true},{label:"Delfin",ok:false}],
+      explain:"Regenwurm, Assel und Milbe leben im Boden – der Delfin lebt im Meer." },
+    { type:"tf", q:"Alle Bodenlebewesen sorgen zusammen für einen besseren Boden.", answer:true,
+      explain:"Richtig – gemeinsam zerkleinern und bauen sie Reste von Pflanzen und Tieren ab." },
+    { type:"mc", q:"Was entsteht, wenn Bodenlebewesen Pflanzen- und Tierreste abbauen?",
+      options:[{label:"Nährstoffreiche Erde",ok:true},{label:"Sand",ok:false},{label:"Glas",ok:false}],
+      explain:"Beim Abbauen der Reste entsteht <b>nährstoffreiche Erde</b>." }
+  ]
+);
+
+STATION_DATA.koerperbau = readingStation(
+  `<h3>Der Körperbau des Regenwurms</h3>Der Regenwurm hat einen langen, schlauchförmigen Körper ohne Beine.
+   Sein Körper besteht aus vielen einzelnen Ringen. Am spitzen Vorderende liegt der <b>Mund</b>, am runden
+   Hinterende liegt der <b>After</b>. Etwas hinter dem Vorderende trägt der Regenwurm einen dickeren, helleren
+   Ring – das ist der <b>Gürtel</b>. An jedem Ring sitzen an der Seite winzige <b>Borsten</b>. Seine Haut ist
+   immer feucht und schimmert grau bis rotbraun.`,
+  [
+    { type:"mc", q:"Wie heißt der vordere, spitze Teil, mit dem der Regenwurm frisst?",
+      options:[{label:"Mund",ok:true},{label:"After",ok:false},{label:"Gürtel",ok:false}],
+      explain:"Am spitzen Vorderende liegt der <b>Mund</b>." },
+    { type:"mc", q:"Wie heißt der dickere, hellere Ring am Vorderteil des Regenwurms?",
+      options:[{label:"Gürtel",ok:true},{label:"Borsten",ok:false},{label:"After",ok:false}],
+      explain:"Der dickere, hellere Ring heißt <b>Gürtel</b>." },
+    { type:"mc", q:"Was sitzt an der Seite jedes Rings?",
+      options:[{label:"Borsten",ok:true},{label:"Flügel",ok:false},{label:"Füße",ok:false}],
+      explain:"An jedem Ring sitzen kleine <b>Borsten</b>." },
+    { type:"tf", q:"Der Regenwurm hat Beine.", answer:false,
+      explain:"Falsch – der Regenwurm hat <b>keine Beine</b>, nur Ringe und Borsten." }
+  ]
+);
+
+STATION_DATA.bewegung = readingStation(
+  `<h3>Fortbewegung & Ernährung</h3>Der Regenwurm bewegt sich kriechend fort. Dabei zieht er abwechselnd
+   einige Ringe zusammen und streckt sie wieder. Die Borsten an der Seite helfen ihm dabei, sich am Boden
+   festzuhalten und voranzukommen. Während er sich durch das Erdreich bewegt, frisst der Regenwurm Erde.
+   Dabei bohrt er lange, unterirdische Gänge in den Boden. Diese Gänge helfen den Pflanzen: Die Wurzeln
+   können leichter wachsen, und Wasser sowie Nährstoffe gelangen besser in den Boden.`,
+  [
+    { type:"mc", q:"Wie bewegt sich der Regenwurm fort?",
+      options:[{label:"Kriechend – er zieht Ringe zusammen und streckt sie",ok:true},{label:"Springend",ok:false},{label:"Schwimmend",ok:false}],
+      explain:"Er bewegt sich <b>kriechend</b> fort, indem er Ringe zusammenzieht und streckt." },
+    { type:"mc", q:"Wofür braucht der Regenwurm seine Borsten?",
+      options:[{label:"Um sich festzuhalten und voranzukommen",ok:true},{label:"Zum Sehen",ok:false},{label:"Zum Atmen",ok:false}],
+      explain:"Die Borsten helfen ihm, sich <b>festzuhalten und voranzukommen</b>." },
+    { type:"tf", q:"Der Regenwurm frisst Erde, während er sich durch den Boden bewegt.", answer:true,
+      explain:"Richtig – dabei bohrt er seine unterirdischen Gänge." },
+    { type:"mc", q:"Wie helfen die Gänge des Regenwurms den Pflanzen?",
+      options:[{label:"Wurzeln wachsen leichter, Wasser & Nährstoffe gelangen besser in den Boden",ok:true},{label:"Die Pflanzen bekommen mehr Sonne",ok:false},{label:"Die Blätter werden größer",ok:false}],
+      explain:"Durch die Gänge wachsen Wurzeln leichter und Wasser sowie Nährstoffe gelangen besser in den Boden." }
+  ]
+);
+
+STATION_DATA.lebensweise = readingStation(
+  `<h3>Warum meidet der Regenwurm das Licht?</h3>Der Regenwurm meidet das Tageslicht. Nur in der Dämmerung
+   oder nachts kommt er an die Erdoberfläche. Dabei zieht er Laub in seine Gänge. Bakterien zersetzen das
+   Laub, sodass der Regenwurm es dann fressen kann. Wenn es stärker regnet, bewegt sich der Regenwurm ebenfalls
+   an die Erdoberfläche. Der Regenwurm atmet nämlich über seine Haut – wenn seine Gänge voller Wasser sind,
+   bekommt er sonst keine Luft mehr.`,
+  [
+    { type:"tf", q:"Der Regenwurm atmet über die Haut.", answer:true,
+      explain:"Richtig – der Regenwurm atmet über seine <b>Haut</b>." },
+    { type:"mc", q:"Wann kommt der Regenwurm meistens an die Erdoberfläche?",
+      options:[{label:"In der Dämmerung oder nachts",ok:true},{label:"Am hellen Mittag",ok:false},{label:"Nie",ok:false}],
+      explain:"Der Regenwurm meidet das Tageslicht und kommt in der <b>Dämmerung oder nachts</b>." },
+    { type:"tf", q:"Bei stärkerem Regen kriecht der Regenwurm in tiefere Erdschichten.", answer:false,
+      explain:"Falsch – er kommt an die <b>Erdoberfläche</b>, weil er über die Haut atmet." },
+    { type:"mc", q:"Was zieht der Regenwurm nachts in seine Gänge?",
+      options:[{label:"Laub",ok:true},{label:"Steine",ok:false},{label:"Sand",ok:false}],
+      explain:"Er zieht <b>Laub</b> in seine Gänge, das Bakterien zersetzen." }
+  ]
+);
+
+STATION_DATA.gaertner = readingStation(
+  `<h3>Gärtner der Erde</h3>Der Regenwurm wird oft „Gärtner der Erde“ genannt. Das liegt daran, dass er
+   beim Graben seiner Gänge den Boden lockert und belüftet. So kommt mehr Luft und Wasser in die Erde, und
+   die Pflanzenwurzeln können besser wachsen. Außerdem frisst der Regenwurm Erde und Pflanzenreste. Was er
+   wieder ausscheidet, ist nährstoffreicher Kot – ein guter, natürlicher Dünger für die Pflanzen im Garten.`,
+  [
+    { type:"mc", q:"Warum wird der Regenwurm „Gärtner der Erde“ genannt?",
+      options:[{label:"Er lockert und belüftet den Boden beim Graben",ok:true},{label:"Er pflanzt Blumen",ok:false},{label:"Er gießt die Pflanzen",ok:false}],
+      explain:"Beim Graben seiner Gänge <b>lockert und belüftet</b> er den Boden." },
+    { type:"tf", q:"Der Kot des Regenwurms ist nährstoffarme Erde.", answer:false,
+      explain:"Falsch – sein Kot ist <b>nährstoffreich</b> und ein guter Dünger für Pflanzen." },
+    { type:"multi", q:"Was bewirken die Gänge des Regenwurms im Boden?",
+      options:[{label:"Mehr Luft im Boden",ok:true},{label:"Mehr Wasser kann eindringen",ok:true},{label:"Wurzeln wachsen besser",ok:true},{label:"Der Boden wird härter",ok:false}],
+      explain:"Die Gänge bringen mehr Luft und Wasser in den Boden – Wurzeln wachsen besser, der Boden wird nicht härter." }
+  ]
+);
+
+STATION_DATA.beobachten = readingStation(
+  `<h3>Regenwürmer beobachten</h3>Man kann Regenwürmer gut in einem großen Glas beobachten. Dafür schichtet
+   man Kies, Gartenerde, Sand und Laub übereinander und setzt die Würmer hinein. Damit es dunkel bleibt wie im
+   Boden, deckt man das Glas mit einer Röhre aus dunklem Tonkarton ab. Die Erde muss immer feucht, aber nicht
+   nass gehalten werden. Betrachtet man einen Regenwurm mit der Lupe, sieht man seine feuchte, geringelte Haut
+   ganz genau. Nach der Beobachtung müssen die Regenwürmer wieder in die Natur gesetzt werden.`,
+  [
+    { type:"mc", q:"Womit hält man das Glas bei der Beobachtung dunkel?",
+      options:[{label:"Mit einer Röhre aus dunklem Tonkarton",ok:true},{label:"Mit einem Glasdeckel",ok:false},{label:"Mit Alufolie ums ganze Glas",ok:false}],
+      explain:"Eine <b>Röhre aus dunklem Tonkarton</b> hält das Glas dunkel wie im Boden." },
+    { type:"tf", q:"Die Erde im Beobachtungsglas sollte immer feucht gehalten werden.", answer:true,
+      explain:"Richtig – die Erde muss <b>feucht, aber nicht nass</b> sein." },
+    { type:"mc", q:"Was muss man nach der Beobachtung mit den Regenwürmern tun?",
+      options:[{label:"Sie wieder in die Natur setzen",ok:true},{label:"Sie behalten",ok:false},{label:"Sie einfrieren",ok:false}],
+      explain:"Achtung: Die Regenwürmer werden danach <b>wieder in die Natur gesetzt</b>." },
+    { type:"tf", q:"Mit der Lupe kann man die geringelte Haut des Regenwurms gut sehen.", answer:true,
+      explain:"Richtig – mit der Lupe erkennt man die feuchte, geringelte Haut ganz genau." }
+  ]
+);
+
+/* ---- Boden-Meister: Fragen zu allen Stationen (kurzer Test) ------------ */
+STATION_DATA["boden-meister"]={
+  text:`<h3>Boden-Meister</h3>Hier kommen Fragen zu allem, was du über das Leben im Boden und den Regenwurm
+        gelernt hast. Wenn du unsicher bist, lies die passende Station noch einmal nach. Viel Erfolg,
+        Boden-Forscher! 🔍`,
+  teach:[{ mascot:"Jetzt kommt die große <b>Boden-Meister-Prüfung</b>! Fragen zu allem, was wir erforscht haben. Ich glaube an dich! 🏆",
+    mood:"cheer",
+    render(b){ b.append(el("h2",{class:"center"},"🏆 Boden-Meister 🏆"));
+      b.append(el("div",{class:"center big"},"Erinnerst du dich an alles über den Boden? Los geht's!")); } }],
+  exercises:[
+    { type:"tf", q:"① Der Regenwurm hat keine Beine.", answer:true,
+      explain:"Richtig – der Regenwurm hat <b>keine Beine</b>." },
+    { type:"mc", q:"② Wie heißt der dickere Ring am Vorderteil des Regenwurms?",
+      options:[{label:"Gürtel",ok:true},{label:"Mund",ok:false},{label:"After",ok:false}],
+      explain:"Der dickere, hellere Ring heißt <b>Gürtel</b>." },
+    { type:"mc", q:"③ Warum wird der Regenwurm „Gärtner der Erde“ genannt?",
+      options:[{label:"Er lockert und belüftet den Boden",ok:true},{label:"Er sammelt Nüsse",ok:false},{label:"Er baut Nester",ok:false}],
+      explain:"Er <b>lockert und belüftet</b> den Boden beim Graben seiner Gänge." },
+    { type:"tf", q:"④ Der Regenwurm atmet über die Haut.", answer:true,
+      explain:"Richtig – er atmet über seine <b>Haut</b>." },
+    { type:"multi", q:"⑤ Welche Tiere leben im Boden?",
+      options:[{label:"Assel",ok:true},{label:"Milbe",ok:true},{label:"Regenwurm",ok:true},{label:"Delfin",ok:false}],
+      explain:"Assel, Milbe und Regenwurm leben im Boden – der Delfin lebt im Meer." },
+    { type:"tf", q:"⑥ Bei starkem Regen kommt der Regenwurm an die Erdoberfläche.", answer:true,
+      explain:"Richtig – sonst bekommt er in seinen vollgelaufenen Gängen keine Luft mehr." }
+  ]
+};
+
+/* ---- Nach dem Laden zum richtigen Bildschirm --------------------------- */
+function routeStart(){
+  updTotal();
+  const r=Store.getProgress();
+  if(r && STATION_DATA[r.id]) startStation(r.id,r);
+  else renderHub();
+}
+
+/* ---- Ton-Schalter ------------------------------------------------------ */
+$("#soundBtn").addEventListener("click",function(){
+  const on=!Sound.get();Sound.set(on);this.textContent=on?"🔊":"🔇";if(on)Sound.click();
+});
+
+/* ---- Einzelne Frage aus dem Elternbericht üben ------------------------- */
+const TOPIC_ID="leben-im-boden";
+let practiceTimer=null;
+function runPractice(stationId, exi){
+  clearTimeout(practiceTimer);
+  const data=STATION_DATA[stationId];
+  const ex = data && data.exercises && data.exercises[+exi];
+  const back=()=>{ clearTimeout(practiceTimer); location.href="../../index.html#report"; };
+  if(!ex){ back(); return; }
+  function goNext(){
+    clearTimeout(practiceTimer);
+    const open=SchoolCloud.openQuestions();
+    if(open.length===0){ back(); return; }
+    const nx=open.filter(q=>q.topic===TOPIC_ID)[0]||open[0];
+    if(nx.topic===TOPIC_ID) runPractice(nx.station, nx.exi);
+    else location.href="../"+nx.topic+"/index.html#practice="+encodeURIComponent(nx.station+":"+nx.exi);
+  }
+  const scr=el("div",{class:"screen"});
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",onclick:back},"← Bericht"));
+  bar.append(el("div",{class:"brand"},el("span",{},"🔁 Üben")));
+  const openNow=SchoolCloud.openQuestions().length;
+  bar.append(el("div",{class:"steplabel"}, openNow>1 ? ("noch "+openNow+" offen") : ((STATIONS.find(s=>s.id===stationId)||{}).n||"")));
+  scr.append(bar);
+  scr.append(mascotRow("Lies genau und finde die richtige Antwort! 🔍","think"));
+  scr.append(readToggle(stationId));
+  const host=el("div",{class:"card"}); scr.append(host);
+  const fb=el("div",{class:"feedback"}); scr.append(fb);
+  setScreen(scr);
+  render();
+  function render(){
+    host.innerHTML="";
+    renderExercise(ex, host, {
+      done:(ok)=>{
+        fb.className="feedback show "+(ok?"ok":"no"); fb.innerHTML="";
+        fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+        const msg=el("div"); msg.innerHTML = ok ? "Richtig erforscht! Klasse! ⭐" : (ex.explain||"Lies den Text noch einmal genau."); fb.append(msg);
+        if(ok){ Sound.good(); Store.clearStat(stationId, exi);
+          const more = SchoolCloud.openQuestions().length>0;
+          fb.append(el("button",{class:"btn green",style:"margin-left:auto",onclick:goNext}, more?"Weiter →":"✓ Fertig – zum Bericht"));
+          practiceTimer=setTimeout(goNext, 1500);
+        } else { Sound.wrong();
+          fb.append(el("button",{class:"btn blue",style:"margin-left:auto",onclick:()=>{fb.classList.remove("show"); render();}},"Nochmal →"));
+        }
+      },
+      wrong:()=>{}
+    });
+  }
+}
+
+/* ---- Start: ggf. Übungsmodus aus dem Bericht, sonst normaler Ablauf ----- */
+function startHere(){
+  const m=/^#practice=([^:]+):(\d+)$/.exec(decodeURIComponent(location.hash||""));
+  if(m){ history.replaceState(null,"",location.pathname); runPractice(m[1], m[2]); return; }
+  routeStart();
+}
+SchoolCloud.bootSync(startHere);
+
+/* App-Installation & Offline-Betrieb */
+if("serviceWorker" in navigator){ window.addEventListener("load",()=>navigator.serviceWorker.register("../../sw.js").catch(()=>{})); }
+
+/* dekorative Wolken */
+(function clouds(){const b=document.body;for(let i=0;i<4;i++){const c=el("div",{class:"cloud"});
+  c.style.top=(8+i*16)+"%";c.style.width=(60+rnd(0,60))+"px";c.style.height=(20+rnd(0,14))+"px";
+  c.style.animationDuration=(40+rnd(0,40))+"s";c.style.animationDelay=(-rnd(0,40))+"s";b.append(c);}})();
+</script>
+</body>
+</html>
