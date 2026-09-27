@@ -3,7 +3,7 @@
    offline wird die zuletzt gespeicherte Kopie genutzt. So gibt es keine
    veralteten Stände nach einem Update. Firestore & fremde Hosts werden nie
    angefasst (die Cloud-Sync braucht immer echtes Netz). */
-const CACHE = "lernportal-v3";
+const CACHE = "lernportal-v4";
 const PRECACHE = [
   "./",
   "index.html",

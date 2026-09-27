@@ -129,11 +129,13 @@ function updTotal(){const e=$("#totalStars");if(e)e.textContent=Store.total();}
    STATIONEN
    ========================================================================= */
 const STATIONS=[
-  {id:"ohne_rest", n:"Teilen ohne Rest",  e:"🟰", c:"--green"},
-  {id:"nur_rest",  n:"Der Rest bleibt",   e:"🌰", c:"--blue"},
-  {id:"mit_rest",  n:"Ganz mit Rest",     e:"➗", c:"--purple"},
-  {id:"sach",      n:"Sachaufgaben",       e:"📖", c:"--pink"},
-  {id:"meister",   n:"Divisions-Meister",  e:"🏆", c:"--gold", master:true}
+  {id:"ohne_rest", n:"Teilen ohne Rest",   e:"🟰", c:"--green"},
+  {id:"gruppen",   n:"Gruppen bilden",      e:"📦", c:"--blue"},
+  {id:"nur_rest",  n:"Der Rest bleibt",    e:"🌰", c:"--blue"},
+  {id:"schritt",   n:"Schritt für Schritt", e:"👣", c:"--purple"},
+  {id:"mit_rest",  n:"Ganz mit Rest",      e:"➗", c:"--purple"},
+  {id:"sach",      n:"Sachaufgaben",        e:"📖", c:"--pink"},
+  {id:"meister",   n:"Divisions-Meister",   e:"🏆", c:"--gold", master:true}
 ];
 
 function renderHub(){
@@ -378,6 +380,65 @@ RENDER.rest=(ex,host,api)=>{
   numpad(host, ex.answer, api);
 };
 
+/* Gruppen-Aufgabe: die Objekte werden SICHTBAR in Gruppen gelegt, der Rest
+   liegt in einer roten Kiste daneben – so sieht man, was "Rest" bedeutet. */
+RENDER.gruppen=(ex,host,api)=>{
+  const q=Math.floor(ex.a/ex.b), r=ex.a%ex.b, em=ex.emoji||"🌰";
+  host.append(el("div",{class:"center muted",style:"font-size:1.1rem;margin-bottom:6px"},
+    ex.a+" in "+ex.b+"er-Gruppen legen:"));
+  const groups=el("div",{style:"display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:6px 0 10px"});
+  for(let g=0; g<q; g++)
+    groups.append(el("div",{style:"border:3px solid var(--green);border-radius:12px;padding:6px 8px;font-size:1.5rem;background:#eafaf1"}, em.repeat(ex.b)));
+  if(r>0) groups.append(el("div",{style:"border:3px dashed var(--red);border-radius:12px;padding:6px 8px;font-size:1.5rem;background:#ffecec"}, em.repeat(r)));
+  host.append(groups);
+  host.append(el("div",{class:"center",style:"font-weight:800;margin-bottom:6px"},"Wie viele volle Gruppen? Wie viele bleiben übrig?"));
+  const box=el("div",{class:"center",style:"display:flex;flex-direction:column;gap:10px;align-items:center"});
+  const opts=[
+    {label:q+" Gruppen, Rest "+r, ok:true},
+    {label:(q+1)+" Gruppen, Rest "+r, ok:false},
+    {label:q+" Gruppen, Rest "+((r+1)%ex.b), ok:false}
+  ];
+  shuffle(opts).forEach(o=>{
+    box.append(el("button",{class:"btn lg",html:o.label,onclick:function(){
+      if(o.ok){ this.classList.add("green"); Sound.click(); api.done(true); }
+      else{ this.classList.add("gray"); this.setAttribute("disabled",""); Sound.wrong(); api.wrong(); api.done(false); }
+    }}));
+  });
+  host.append(box);
+};
+
+/* Schritt-für-Schritt: erst "wie oft passt es hinein?" (das Ergebnis),
+   dann "wie viel bleibt übrig?" (der Rest) – zwei klar getrennte Fragen. */
+RENDER.schritt=(ex,host,api)=>{
+  const q=Math.floor(ex.a/ex.b), r=ex.a%ex.b;
+  const eq=el("div",{class:"calc"});
+  eq.append(document.createTextNode(ex.a+" ")); eq.append(el("span",{class:"op"},":")); eq.append(document.createTextNode(" "+ex.b));
+  host.append(eq);
+  const step=el("div",{class:"center big",style:"margin:6px 0"}); host.append(step);
+  const padHost=el("div"); host.append(padHost);
+  function ask(prompt, answer, onOk){
+    step.textContent=prompt; padHost.innerHTML="";
+    const disp=el("div",{class:"ansbox"},"?"); let cur="";
+    const upd=()=>{ disp.textContent = cur===""?"?":cur; };
+    padHost.append(el("div",{class:"center"}, disp));
+    const pad=el("div",{class:"numpad"});
+    ["1","2","3","4","5","6","7","8","9","⌫","0","✓"].forEach(k=>{
+      const cls="numkey"+(k==="✓"?" ok":k==="⌫"?" del":"");
+      pad.append(el("button",{class:cls,onclick:()=>{ Sound.click();
+        if(k==="⌫"){ cur=cur.slice(0,-1); upd(); }
+        else if(k==="✓"){ if(cur===""){ toast("Gib zuerst eine Zahl ein"); return; }
+          if(parseInt(cur,10)===answer){ onOk(); } else { api.wrong(); api.done(false); } }
+        else { if(cur.length<4){ cur+=k; upd(); } }
+      }},k));
+    });
+    padHost.append(pad);
+  }
+  ask("Wie oft passt die "+ex.b+" hinein?", q, ()=>{
+    Sound.good();
+    ask("Und wie viel bleibt übrig?", r, ()=>{ api.done(true); });
+  });
+};
+
 /* =========================================================================
    INHALTE  (Dividieren mit Rest – Mathe & Sachaufgaben gemischt)
    ========================================================================= */
@@ -404,6 +465,12 @@ function wortR(text,a,b){ const q=Math.floor(a/b), r=a%b;
   [(q+1)+" Rest "+r, q+" Rest "+((r+1)%b)].forEach(c=>{ if(!opts.some(o=>o.label===c)) opts.push({label:c,ok:false}); });
   return {type:"mc", q:text, options:opts, explain:a+" : "+b+" = <b>"+q+" Rest "+r+"</b>."};
 }
+/* Gruppen-Aufgabe (sichtbar) */
+const grp=(a,b,emoji)=>({type:"gruppen", a, b, emoji, q:a+" : "+b+" (Gruppen)",
+  explain:a+" : "+b+" = <b>"+Math.floor(a/b)+" Rest "+(a%b)+"</b>."});
+/* Schritt-für-Schritt-Aufgabe */
+const schritt=(a,b)=>({type:"schritt", a, b, q:a+" : "+b+" (Schritt für Schritt)",
+  explain:a+" : "+b+" = "+Math.floor(a/b)+" Rest <b>"+(a%b)+"</b>."});
 
 /* 1) glatte Division – Aufwärmen */
 STATION_DATA.ohne_rest={
@@ -417,14 +484,14 @@ STATION_DATA.nur_rest={
   teach:[{ mascot:"Manchmal geht das Teilen <b>nicht glatt</b> auf. Dann bleibt ein <b>Rest</b> übrig. <b>13 : 4</b> = 3, und <b>1</b> bleibt übrig.",
     render(b){ b.append(el("h2",{class:"center"},"Der Rest bleibt 🌰"));
       b.append(el("div",{class:"reihe"},"13 : 4 → 3, Rest 1")); } }],
-  exercises:[ rest(13,4),rest(17,5),rest(19,3),rest(22,5),rest(11,4),rest(25,6),rest(14,3),rest(23,5) ]
+  exercises:[ rest(13,4),rest(17,5),rest(19,3),rest(22,5),rest(11,4),rest(25,6),rest(14,3),rest(23,5),rest(27,4),rest(20,3) ]
 };
 /* 3) volle Antwort mit Rest */
 STATION_DATA.mit_rest={
   teach:[{ mascot:"Jetzt beides zusammen: <b>wie oft</b> passt es hinein und <b>wie viel</b> bleibt übrig? Tippe die richtige Antwort.",
     render(b){ b.append(el("h2",{class:"center"},"Ganz mit Rest ➗"));
       b.append(el("div",{class:"reihe"},"22 : 4 = 5 Rest 2")); } }],
-  exercises:[ divR(13,4),divR(17,5),divR(19,3),divR(22,4),divR(11,2),divR(26,5),divR(29,6),divR(15,4) ]
+  exercises:[ divR(13,4),divR(17,5),divR(19,3),divR(22,4),divR(11,2),divR(26,5),divR(29,6),divR(15,4),divR(23,4),divR(20,3) ]
 };
 /* 4) Sachaufgaben (Textaufgaben) */
 STATION_DATA.sach={
@@ -439,7 +506,9 @@ STATION_DATA.sach={
     wortR("⚽ 22 Kinder bilden Teams zu je 5. Wie viele volle Teams – und wie viele Kinder bleiben übrig?",22,5),
     wortR("🚗 26 Räder. Jedes Auto braucht 4 Räder. Wie viele Autos – und wie viele Räder bleiben übrig?",26,4),
     wortR("🧁 19 Muffins auf 6 Freunde. Wie viele pro Freund, wie viele bleiben übrig?",19,6),
-    wortR("✏️ 21 Stifte in 4er-Päckchen. Wie viele volle Päckchen – und wie viele Stifte bleiben übrig?",21,4)
+    wortR("✏️ 21 Stifte in 4er-Päckchen. Wie viele volle Päckchen – und wie viele Stifte bleiben übrig?",21,4),
+    wortR("🚌 29 Kinder fahren Bus. In jede Reihe passen 4. Wie viele volle Reihen – und wie viele Kinder bleiben übrig?",29,4),
+    wortR("🍕 25 Pizzastücke an 6 Kinder. Wie viele pro Kind, wie viele bleiben übrig?",25,6)
   ]
 };
 /* 5) Meister: Mathe & Text gemischt */
@@ -448,11 +517,24 @@ STATION_DATA.meister={
     render(b){ b.append(el("h2",{class:"center"},"🏆 Divisions-Meister 🏆"));
       b.append(el("div",{class:"center big"},"Glatte Aufgaben, Rest-Aufgaben und Geschichten.")); } }],
   exercises:[
-    div(28,7), rest(20,6), divR(23,5),
-    wortR("🍬 27 Bonbons an 4 Kinder. Wie viele pro Kind, wie viele übrig?",27,4),
-    div(36,6), rest(17,4), divR(31,4),
-    wortR("🎁 30 Sticker auf 7 Kinder. Wie viele pro Kind, wie viele übrig?",30,7)
+    div(28,7), grp(19,5,"🍪"), rest(20,6), schritt(23,5),
+    divR(31,4), wortR("🍬 27 Bonbons an 4 Kinder. Wie viele pro Kind, wie viele übrig?",27,4),
+    div(36,6), wortR("🎁 30 Sticker auf 7 Kinder. Wie viele pro Kind, wie viele übrig?",30,7)
   ]
+};
+/* NEU: Gruppen sichtbar bilden – zeigt, was der Rest ist */
+STATION_DATA.gruppen={
+  teach:[{ mascot:"Schau genau hin! Wir legen die Dinge in <b>gleich große Gruppen</b>. Was nicht mehr in eine volle Gruppe passt, ist der <b>Rest</b>. 🌰",
+    render(b){ b.append(el("h2",{class:"center"},"Gruppen bilden 📦"));
+      b.append(el("div",{class:"center big"},"Grüne Kiste = volle Gruppe · rote Kiste = Rest.")); } }],
+  exercises:[ grp(13,4,"🌰"),grp(17,5,"🍎"),grp(11,3,"⚽"),grp(19,6,"🍪"),grp(14,4,"🎈"),grp(23,5,"🌰"),grp(10,3,"🍓"),grp(16,5,"🐟") ]
+};
+/* NEU: Schritt für Schritt – erst wie oft, dann wie viel Rest */
+STATION_DATA.schritt={
+  teach:[{ mascot:"In <b>zwei Schritten</b> wird's leicht: <b>1.</b> Wie oft passt die Zahl hinein? <b>2.</b> Wie viel bleibt dann übrig? Nicht verwechseln! 👣",
+    render(b){ b.append(el("h2",{class:"center"},"Schritt für Schritt 👣"));
+      b.append(el("div",{class:"reihe"},"13 : 4 → passt 3-mal → 1 bleibt übrig")); } }],
+  exercises:[ schritt(13,4),schritt(17,5),schritt(22,5),schritt(19,3),schritt(25,6),schritt(11,4),schritt(23,5),schritt(29,6) ]
 };
 
 function routeStart(){
