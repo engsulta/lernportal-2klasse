@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Übungs-Igel 🍂 – Oktober-Wiederholung</title>
+<link rel="stylesheet" href="../../shared/styles.css">
+<link rel="manifest" href="../../manifest.webmanifest">
+<meta name="theme-color" content="#7ec8ff">
+<link rel="apple-touch-icon" href="../../icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Lernportal">
+<style>
+.emoji-mascot{display:flex;align-items:center;justify-content:center;font-size:60px;
+  background:#eef4ff;border-radius:50%;box-shadow:var(--shadow-s)}
+.calc{font-size:2.4rem;font-weight:900;text-align:center;margin:6px 0 2px;letter-spacing:1px;color:var(--ink)}
+.calc .op{color:var(--brand-d);margin:0 8px}
+.ansbox{display:inline-block;min-width:96px;font-size:2rem;font-weight:900;text-align:center;
+  background:var(--paper-2);border:3px solid var(--sky-1);border-radius:14px;padding:6px 14px;margin:10px auto;color:var(--ink)}
+.numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:270px;margin:8px auto 0}
+.numkey{font:inherit;font-weight:800;font-size:1.4rem;padding:14px 0;border:none;border-radius:14px;
+  background:#fff;box-shadow:var(--shadow-s);cursor:pointer;color:var(--ink)}
+.numkey:active{transform:translateY(2px)}
+.numkey.ok{background:var(--green);color:#fff}
+.numkey.del{background:#ffe6e6}
+.reihe{font-size:1.25rem;font-weight:800;letter-spacing:1px;color:var(--brand-d);text-align:center;margin-top:8px}
+/* Lücke in der Gleichung (die fehlende Zahl) */
+.calc .gap{display:inline-block;min-width:1.3em;padding:0 .12em;border-bottom:5px solid var(--brand);
+  color:var(--brand-d);line-height:1}
+</style>
+</head>
+<body>
+<canvas id="confetti"></canvas>
+
+<div id="app">
+  <div class="topbar">
+    <div class="brand"><span class="logo">🍂</span><span>Oktober-Übung</span></div>
+    <div class="score"><span class="star">★</span><span id="totalStars">0</span></div>
+    <button class="iconbtn" id="soundBtn" title="Ton an/aus">🔊</button>
+  </div>
+  <div id="screen"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="../../shared/config.js"></script>
+<script src="../../shared/cloud.js"></script>
+<script>
+"use strict";
+
+const $  = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
+function el(tag, attrs={}, ...kids){
+  const n=document.createElement(tag);
+  for(const k in attrs){
+    if(k==="class") n.className=attrs[k];
+    else if(k==="html") n.innerHTML=attrs[k];
+    else if(k.startsWith("on")&&typeof attrs[k]==="function") n.addEventListener(k.slice(2),attrs[k]);
+    else if(attrs[k]!=null) n.setAttribute(k,attrs[k]);
+  }
+  for(const c of kids){ if(c==null) continue; n.append(c.nodeType?c:document.createTextNode(c)); }
+  return n;
+}
+const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=rnd(0,i);[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+const Sound=(()=>{
+  let ctx=null, on=true;
+  function ac(){ if(!ctx) ctx=new (window.AudioContext||window.webkitAudioContext)();
+    if(ctx.state==="suspended"){ ctx.resume(); } return ctx; }
+  ["pointerdown","touchstart","keydown","click"].forEach(ev=>
+    window.addEventListener(ev,()=>{ try{ ac(); }catch(e){} },{passive:true}));
+  function tone(f,t,dur,type="sine",vol=.18){
+    if(!on) return; const c=ac(); const o=c.createOscillator(),g=c.createGain();
+    o.type=type;o.frequency.setValueAtTime(f,t);o.connect(g);g.connect(c.destination);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.01);
+    g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.start(t);o.stop(t+dur);
+  }
+  return {
+    set(v){on=v;}, get(){return on;},
+    click(){if(!on)return;const t=ac().currentTime;tone(440,t,.06,"triangle",.10);},
+    good(){if(!on)return;const t=ac().currentTime;[523,659,784].forEach((f,i)=>tone(f,t+i*.09,.18,"sine",.16));},
+    wrong(){if(!on)return;const t=ac().currentTime;tone(280,t,.18,"sawtooth",.1);tone(200,t+.12,.22,"sawtooth",.1);},
+    win(){if(!on)return;const t=ac().currentTime;[523,587,659,784,880,1046].forEach((f,i)=>tone(f,t+i*.12,.3,"triangle",.16));}
+  };
+})();
+
+const Confetti=(()=>{
+  const cv=$("#confetti"),cx=cv.getContext("2d");let parts=[],raf=null;
+  function size(){cv.width=innerWidth;cv.height=innerHeight;}
+  addEventListener("resize",size);
+  const COL=["#ff7a59","#ffd23f","#36c98d","#3aa0ff","#9b6bff","#ff79c6"];
+  function burst(n=160){
+    size();cv.style.display="block";
+    for(let i=0;i<n;i++)parts.push({x:innerWidth/2+rnd(-60,60),y:innerHeight/3,
+      vx:rnd(-90,90)/10,vy:rnd(-150,-40)/10,g:.18+Math.random()*.12,
+      s:rnd(6,13),c:pick(COL),r:Math.random()*6,vr:(Math.random()-.5)*.5,life:rnd(80,140)});
+    if(!raf)loop();
+  }
+  function loop(){
+    cx.clearRect(0,0,cv.width,cv.height);
+    parts.forEach(p=>{p.vy+=p.g;p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;p.life--;
+      cx.save();cx.translate(p.x,p.y);cx.rotate(p.r);cx.fillStyle=p.c;
+      cx.fillRect(-p.s/2,-p.s/2,p.s,p.s*.6);cx.restore();});
+    parts=parts.filter(p=>p.life>0&&p.y<cv.height+30);
+    if(parts.length)raf=requestAnimationFrame(loop);
+    else{raf=null;cv.style.display="none";}
+  }
+  return {burst};
+})();
+
+const toast=SchoolCloud.toast;
+
+const Store = SchoolCloud.store("oktober-wiederholung");
+const Cloud = { ready: SchoolCloud.ready };
+function renderCodeScreen(firstRun){ SchoolCloud.showCodeScreen(firstRun, routeStart); }
+
+function mascotRow(text,mood="happy"){
+  const row=el("div",{class:"mascot-row"});
+  const face = mood==="cheer"?"🦔🎉":mood==="think"?"🦔🤔":"🦔";
+  row.append(el("div",{class:"mascot emoji-mascot"},face));
+  row.append(el("div",{class:"bubble",html:text}));
+  return row;
+}
+function setScreen(node){const s=$("#screen");s.innerHTML="";s.append(node);window.scrollTo(0,0);}
+function updTotal(){const e=$("#totalStars");if(e)e.textContent=Store.total();}
+
+/* =========================================================================
+   STATIONEN
+   ========================================================================= */
+const STATIONS=[
+  {id:"plus",   n:"Plus mit Lücke",         e:"➕", c:"--green"},
+  {id:"minus",  n:"Minus mit Lücke",        e:"➖", c:"--blue"},
+  {id:"mal",    n:"Mal mit Lücke",          e:"✖️", c:"--purple"},
+  {id:"geteilt",n:"Geteilt mit Lücke",      e:"➗", c:"--pink"},
+  {id:"rest",   n:"Teilen mit Rest & Lücke", e:"🧩", c:"--brand"},
+  {id:"meister",n:"Wiederholungs-Meister",  e:"🏆", c:"--gold", master:true}
+];
+
+function renderHub(){
+  updTotal();
+  const wrap=el("div",{class:"screen"});
+  wrap.append(el("h1",{class:"hub-title"},"🍂 Oktober-Wiederholung"));
+  wrap.append(el("div",{class:"hub-sub"},"Umkehraufgaben – die fehlende Zahl finden"));
+  wrap.append(mascotRow("Hallo! Ich bin <b>Igor der Übungs-Igel</b> 🦔. Vor dem Test üben wir <b>Umkehraufgaben</b>: Wenn eine Zahl fehlt, <b>drehen wir die Rechnung um</b>! 🍂"));
+
+  const prog=Store.getProgress();
+  if(prog && STATION_DATA[prog.id]){
+    const ps=STATIONS.find(x=>x.id===prog.id);
+    const cont=el("div",{class:"center",style:"margin:2px 0 12px"});
+    cont.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();startStation(prog.id,prog);}},
+      "▶ Weitermachen: "+(ps?ps.n:"")+" – Aufgabe "+((prog.i||0)+1)));
+    wrap.append(cont);
+  }
+
+  const grid=el("div",{class:"stations"});
+  let prevDone=true;
+  STATIONS.forEach((s,i)=>{
+    const stars=Store.stars(s.id), done=Store.data.done[s.id];
+    const locked = !prevDone && !done;
+    const card=el("div",{class:"station"+(s.master?" master":"")+(done?" done":"")+(locked?" locked":"")});
+    card.style.borderColor = done? "var(--gold)":"transparent";
+    card.append(el("span",{class:"num"},String(i+1)));
+    card.append(el("span",{class:"emoji"},s.e));
+    card.append(el("div",{class:"nm"},s.n));
+    const sd=el("div",{class:"stars"});
+    for(let k=0;k<3;k++)sd.append(el("span",{class:"s"+(k<stars?" on":"")},"★"));
+    card.append(sd);
+    if(!locked) card.addEventListener("click",()=>{Sound.click();startStation(s.id);});
+    grid.append(card);
+    prevDone = done;
+  });
+  wrap.append(grid);
+
+  const foot=el("div",{class:"center",style:"margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  foot.append(el("button",{class:"btn gray",onclick:()=>{location.href="../../index.html";}},"← Themen"));
+  foot.append(el("button",{class:"btn gray",onclick:()=>{
+      if(confirm("Fortschritt in diesem Thema zurücksetzen?")){Store.reset();renderHub();}
+    }},"↺ Neu starten"));
+  if(Cloud.ready()){
+    foot.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();renderCodeScreen(false);}},
+      "☁️ Code: "+(SchoolCloud.code()||"—")));
+  }
+  wrap.append(foot);
+  setScreen(wrap);
+}
+
+function stationHeader(id,step){
+  const s=STATIONS.find(x=>x.id===id);
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",
+    onclick:()=>{Sound.click();renderHub();}},"← Karte"));
+  bar.append(el("div",{class:"brand"},el("span",{},s.e+" "+s.n)));
+  bar.append(el("div",{class:"steplabel"},step||""));
+  return bar;
+}
+
+function startStation(id,resume){
+  const data=STATION_DATA[id];
+  if(!data){toast("Diese Station wird noch gebaut …");return;}
+  const teach=data.teach||[];
+  const exercises=data.exercises||[];
+  let ti=0;
+  if(resume){ runExercises(id,exercises,resume); return; }
+  if(teach.length) showTeach(); else runExercises(id,exercises);
+
+  function showTeach(){
+    const card=teach[ti];
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id,"Erklärung "+(ti+1)+"/"+teach.length));
+    const body=el("div",{class:"card"});
+    if(card.render){ card.render(body); }
+    else {
+      if(card.title) body.append(el("h2",{class:"center"},card.title));
+      if(card.html)  body.append(el("div",{class:"center",html:card.html}));
+    }
+    scr.append(card.mascot? mascotRow(card.mascot,card.mood||"think"):document.createTextNode(""));
+    scr.append(body);
+    const nav=el("div",{class:"center",style:"margin-top:8px"});
+    nav.append(el("button",{class:"btn lg green",onclick:()=>{
+      Sound.click(); ti++;
+      if(ti<teach.length) showTeach(); else runExercises(id,exercises);
+    }}, ti<teach.length-1?"Weiter →":"Los, üben! 🦔"));
+    scr.append(nav);
+    setScreen(scr);
+  }
+}
+
+function runExercises(id,list,resume){
+  let i=resume && resume.i<list.length ? resume.i : 0,
+      wrongTotal=resume ? resume.wrongTotal||0 : 0;
+  const stName=()=>(STATIONS.find(s=>s.id===id)||{}).n;
+  const exLbl=()=>list[i] ? (list[i].q||("Aufgabe "+(i+1))) : "";
+  const logWrong=()=>Store.recordWrong(id,i,exLbl(),stName());
+  next();
+
+  function next(){
+    if(i>=list.length){ return finish(); }
+    Store.saveProgress({id, i, wrongTotal});
+    const ex=list[i];
+    Store.recordSeen(id,i,exLbl(),stName());
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id));
+    const pr=el("div",{class:"card"});
+    const bar=el("div",{class:"progress"});const fill=el("i");bar.append(fill);
+    pr.append(bar);
+    fill.style.width=(i/list.length*100)+"%";
+    pr.append(el("div",{class:"steplabel"},"Aufgabe "+(i+1)+" von "+list.length));
+    scr.append(pr);
+
+    const host=el("div",{class:"card"});
+    scr.append(host);
+    const fb=el("div",{class:"feedback"});scr.append(fb);
+    setScreen(scr);
+
+    const api={
+      done:(ok)=>{ if(ok){ fill.style.width=((i+1)/list.length*100)+"%"; }
+        afterAnswer(ok,ex,fb,()=>{ i++; next(); }); },
+      wrong:()=>{ wrongTotal++; logWrong(); }
+    };
+    renderExercise(ex,host,api);
+  }
+
+  function afterAnswer(ok,ex,fb,cont){
+    fb.className="feedback show "+(ok?"ok":"no");
+    fb.innerHTML="";
+    fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+    const msg=el("div");
+    msg.innerHTML = ok ? pick(["Super!","Richtig! ⭐","Klasse!","Genau!","Stark gerechnet!"])
+                       : (ex.explain||"Schau nochmal genau hin und probiere es nochmal.");
+    fb.append(msg);
+    if(ok)Sound.good(); else Sound.wrong();
+    if(ok){
+      fb.append(el("button",{class:"btn green",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");cont();}},"Weiter →"));
+    }else{
+      fb.append(el("button",{class:"btn blue",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");retry();}},"Nochmal →"));
+    }
+    function retry(){
+      const host=fb.previousSibling;
+      host.innerHTML=""; renderExercise(ex,host,{
+        done:(ok2)=>{ afterAnswer(ok2,ex,fb,()=>{i++;next();}); },
+        wrong:()=>{wrongTotal++; logWrong();}
+      });
+    }
+  }
+
+  function finish(){
+    Store.clearProgress();
+    let stars = wrongTotal===0?3 : (wrongTotal<=2?2:1);
+    Store.setStars(id,stars); updTotal();
+    const isMaster = id==="meister";
+    const scr=el("div",{class:"result screen"});
+    scr.append(stationHeader(id,"Geschafft!"));
+    const card=el("div",{class:"card center"});
+    card.append(el("div",{class:"huge"}, isMaster?"🏆 WIEDERHOLUNGS-MEISTER! 🏆":"Geschafft! 🎉"));
+    const st=el("div",{class:"bigstars"});
+    for(let k=0;k<3;k++)st.append(el("span",{class:"s"},"★"));
+    card.append(st);
+    card.append(el("p",{class:"big"}, stars===3?"Perfekt – alles richtig!":stars===2?"Sehr gut gerechnet!":"Geschafft – Übung macht den Meister!"));
+    if(isMaster){
+      card.append(el("div",{class:"badge"},"🏅"));
+      card.append(el("p",{html:"Du bist bereit für den Test! Umkehraufgaben kannst du jetzt. 🦔🍂"}));
+    }
+    const nav=el("div",{style:"margin-top:10px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+    nav.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();renderHub();}},"🗺️ Zur Karte"));
+    nav.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();startStation(id);}},"↻ Nochmal"));
+    const idx=STATIONS.findIndex(s=>s.id===id);
+    if(idx<STATIONS.length-1){
+      nav.append(el("button",{class:"btn",onclick:()=>{Sound.click();startStation(STATIONS[idx+1].id);}},"Nächste Station →"));
+    }
+    card.append(nav);
+    scr.append(card);
+    setScreen(scr);
+    setTimeout(()=>{ const ss=$$(".bigstars .s");
+      for(let k=0;k<stars;k++)setTimeout(()=>{ss[k].classList.add("on");Sound.good();},k*350);
+    },200);
+    if(stars>=3||isMaster){Confetti.burst(isMaster?240:160);Sound.win();}
+    else if(stars===2){Confetti.burst(90);Sound.good();}
+  }
+}
+
+/* =========================================================================
+   RENDERER  (calc mit Ziffernblock)
+   ========================================================================= */
+function renderExercise(ex,host,api){ (RENDER[ex.type]||RENDER.calc)(ex,host,api); }
+const RENDER={};
+
+function numpad(host, answer, api){
+  const disp=el("div",{class:"ansbox"},"?");
+  let cur="";
+  const upd=()=>{ disp.textContent = cur===""?"?":cur; };
+  host.append(el("div",{class:"center"}, disp));
+  const pad=el("div",{class:"numpad"});
+  ["1","2","3","4","5","6","7","8","9","⌫","0","✓"].forEach(k=>{
+    const cls="numkey"+(k==="✓"?" ok":k==="⌫"?" del":"");
+    pad.append(el("button",{class:cls,onclick:()=>{ Sound.click();
+      if(k==="⌫"){ cur=cur.slice(0,-1); upd(); }
+      else if(k==="✓"){
+        if(cur===""){ toast("Gib zuerst eine Zahl ein"); return; }
+        if(parseInt(cur,10)===answer){ api.done(true); }
+        else { api.wrong(); api.done(false); }
+      } else { if(cur.length<4){ cur+=k; upd(); } }
+    }},k));
+  });
+  host.append(pad);
+}
+
+RENDER.calc=(ex,host,api)=>{
+  const eq=el("div",{class:"calc"});
+  eq.append(document.createTextNode(ex.a+" "));
+  eq.append(el("span",{class:"op"},ex.op||"·"));
+  eq.append(document.createTextNode(" "+ex.b+" = "));
+  host.append(eq);
+  numpad(host, (ex.answer!=null?ex.answer:ex.a*ex.b), api);
+};
+
+RENDER.mc=(ex,host,api)=>{
+  host.append(el("div",{class:"center big",style:"margin-bottom:10px",html:ex.q}));
+  const box=el("div",{class:"center",style:"display:flex;flex-direction:column;gap:10px;align-items:center"});
+  shuffle(ex.options).forEach(o=>{
+    box.append(el("button",{class:"btn lg",html:o.label,onclick:function(){
+      if(o.ok){ this.classList.add("green"); Sound.click(); api.done(true); }
+      else{ this.classList.add("gray"); this.setAttribute("disabled",""); Sound.wrong(); api.wrong(); api.done(false); }
+    }}));
+  });
+  host.append(box);
+};
+
+/* Gleichung mit Lücke: zeigt z. B. "58 + ? = 64" und fragt die fehlende Zahl. */
+RENDER.luecke=(ex,host,api)=>{
+  host.append(el("div",{class:"calc",html:ex.q}));
+  numpad(host, ex.answer, api);
+};
+
+/* =========================================================================
+   INHALTE  (Oktober-Wiederholung – Umkehraufgaben / fehlende Zahl)
+   ========================================================================= */
+const STATION_DATA={};
+const G="<span class='gap'>?</span>";   // die Lücke
+/* Plus: Summand fehlt  → Plus rückwärts ist Minus */
+const addMiss =(a,c)=>({type:"luecke", q:a+" + "+G+" = "+c, answer:c-a, explain:"Plus rückwärts ist Minus: "+c+" − "+a+" = <b>"+(c-a)+"</b>."});
+const addMiss1=(b,c)=>({type:"luecke", q:G+" + "+b+" = "+c, answer:c-b, explain:"Plus rückwärts ist Minus: "+c+" − "+b+" = <b>"+(c-b)+"</b>."});
+/* Minus: Subtrahend fehlt (hinten) / Minuend fehlt (vorne) */
+const subMiss =(a,c)=>({type:"luecke", q:a+" − "+G+" = "+c, answer:a-c, explain:"Lücke hinten: "+a+" − "+c+" = <b>"+(a-c)+"</b>."});
+const subMiss1=(b,c)=>({type:"luecke", q:G+" − "+b+" = "+c, answer:c+b, explain:"Lücke vorne: "+c+" + "+b+" = <b>"+(c+b)+"</b>."});
+/* Mal: Faktor fehlt  → Mal rückwärts ist Geteilt */
+const mulMiss =(a,c)=>({type:"luecke", q:a+" · "+G+" = "+c, answer:c/a, explain:"Mal rückwärts ist Geteilt: "+c+" : "+a+" = <b>"+(c/a)+"</b>."});
+const mulMiss1=(b,c)=>({type:"luecke", q:G+" · "+b+" = "+c, answer:c/b, explain:"Mal rückwärts ist Geteilt: "+c+" : "+b+" = <b>"+(c/b)+"</b>."});
+/* Geteilt: Teiler fehlt (hinten) / Dividend fehlt (vorne) → Geteilt rückwärts ist Mal */
+const divMissB=(a,q)=>({type:"luecke", q:a+" : "+G+" = "+q, answer:a/q, explain:"Teiler fehlt: "+a+" : "+q+" = <b>"+(a/q)+"</b>."});
+const divMissA=(b,q)=>({type:"luecke", q:G+" : "+b+" = "+q, answer:q*b, explain:"Geteilt rückwärts ist Mal: "+q+" · "+b+" = <b>"+(q*b)+"</b>."});
+/* Mit Rest: Dividend fehlt (vorne) / Teiler fehlt (hinten) */
+const divMissAR=(b,q,r)=>({type:"luecke", q:G+" : "+b+" = "+q+" Rest "+r, answer:q*b+r, explain:"Erst mal, dann Rest dazu: "+q+" · "+b+" + "+r+" = <b>"+(q*b+r)+"</b>."});
+const divMissBR=(a,q,r)=>({type:"luecke", q:a+" : "+G+" = "+q+" Rest "+r, answer:(a-r)/q, explain:"Rest weg, dann teilen: ("+a+" − "+r+") : "+q+" = <b>"+((a-r)/q)+"</b>."});
+const mult=(a,b,explain)=>({type:"calc", q:a+" · "+b+" = ?", a, b, op:"·", answer:a*b,
+  explain: explain || (a+" · "+b+" = <b>"+(a*b)+"</b>.")});
+
+/* 1) Plus mit Lücke – Summand fehlt (wie 58 + __ = 64) */
+STATION_DATA.plus={
+  teach:[{ mascot:"Eine Zahl fehlt beim <b>Plus</b>! Trick: <b>Plus rückwärts ist Minus</b>. Bei <b>58 + ? = 64</b> rechnest du <b>64 − 58 = 6</b>.",
+    render(b){ b.append(el("h2",{class:"center"},"Plus mit Lücke ➕"));
+      b.append(el("div",{class:"reihe"},"58 + ? = 64  →  64 − 58 = 6")); } }],
+  exercises:[
+    addMiss(58,64), addMiss(49,53), addMiss(75,92), addMiss(46,74),
+    addMiss(30,48), addMiss(25,60), addMiss1(26,64), addMiss1(18,53)
+  ]
+};
+/* 2) Minus mit Lücke – Subtrahend (hinten) oder Minuend (vorne) fehlt */
+STATION_DATA.minus={
+  teach:[{ mascot:"Beim <b>Minus</b>: Lücke <b>hinten</b> (93 − ? = 85) → rechne <b>93 − 85 = 8</b>. Lücke <b>vorne</b> (? − 5 = 37) → rechne <b>37 + 5 = 42</b>.",
+    render(b){ b.append(el("h2",{class:"center"},"Minus mit Lücke ➖"));
+      b.append(el("div",{class:"reihe"},"93 − ? = 85  →  93 − 85 = 8")); } }],
+  exercises:[
+    subMiss(93,85), subMiss(64,34), subMiss(71,58), subMiss(85,47),
+    subMiss(76,48), subMiss(94,45), subMiss1(5,37), subMiss1(17,36)
+  ]
+};
+/* 3) Mal mit Lücke – Faktor fehlt (wie 6 · __ = 36) */
+STATION_DATA.mal={
+  teach:[{ mascot:"Ein <b>Faktor</b> fehlt beim <b>Mal</b>! Trick: <b>Mal rückwärts ist Geteilt</b>. Bei <b>6 · ? = 36</b> rechnest du <b>36 : 6 = 6</b>.",
+    render(b){ b.append(el("h2",{class:"center"},"Mal mit Lücke ✖️"));
+      b.append(el("div",{class:"reihe"},"6 · ? = 36  →  36 : 6 = 6")); } }],
+  exercises:[
+    mulMiss(6,36), mulMiss(8,32), mulMiss(9,81), mulMiss(4,28),
+    mulMiss1(3,24), mulMiss1(7,49), mulMiss1(7,21), mulMiss1(5,45)
+  ]
+};
+/* 4) Geteilt mit Lücke – Teiler (hinten) oder Dividend (vorne) fehlt */
+STATION_DATA.geteilt={
+  teach:[{ mascot:"Eine Zahl fehlt beim <b>Teilen</b>! Trick: <b>Geteilt rückwärts ist Mal</b>. Bei <b>? : 3 = 9</b> rechnest du <b>9 · 3 = 27</b>. Bei <b>18 : ? = 2</b> rechnest du <b>18 : 2 = 9</b>.",
+    render(b){ b.append(el("h2",{class:"center"},"Geteilt mit Lücke ➗"));
+      b.append(el("div",{class:"reihe"},"? : 3 = 9  →  9 · 3 = 27")); } }],
+  exercises:[
+    divMissB(18,2), divMissB(28,4), divMissB(54,6), divMissB(40,5),
+    divMissA(3,9), divMissA(6,7), divMissA(8,7), divMissA(4,8)
+  ]
+};
+/* 5) Teilen mit Rest & Lücke – die „Division-Matrix" mit Rest */
+STATION_DATA.rest={
+  teach:[{ mascot:"Mit <b>Rest</b>! Bei <b>? : 4 = 7 Rest 3</b> rechnest du <b>7 · 4 + 3 = 31</b> (erst mal, dann Rest dazu). Bei <b>31 : ? = 7 Rest 3</b> rechnest du <b>(31 − 3) : 7 = 4</b>.",
+    render(b){ b.append(el("h2",{class:"center"},"Teilen mit Rest & Lücke 🧩"));
+      b.append(el("div",{class:"reihe"},"? : 4 = 7 Rest 3  →  7 · 4 + 3 = 31")); } }],
+  exercises:[
+    divMissAR(4,7,3), divMissAR(5,8,2), divMissAR(3,6,1), divMissAR(6,5,4),
+    divMissAR(7,4,2), divMissAR(4,9,3), divMissBR(31,7,3), divMissBR(42,8,2)
+  ]
+};
+/* 6) Meister: alle Umkehraufgaben gemischt */
+STATION_DATA.meister={
+  teach:[{ mascot:"Jetzt <b>alles gemischt</b> – Plus, Minus, Mal und Geteilt mit Lücke. Wie vor dem Test! Zeig, dass du ein <b>Wiederholungs-Meister</b> bist! 🏆", mood:"cheer",
+    render(b){ b.append(el("h2",{class:"center"},"🏆 Wiederholungs-Meister 🏆"));
+      b.append(el("div",{class:"center big"},"Alle Umkehraufgaben gemischt.")); } }],
+  exercises:[
+    addMiss(47,72), subMiss(82,36), mulMiss1(3,27), divMissB(45,5),
+    divMissA(7,6), divMissAR(5,7,1), mulMiss(6,54), subMiss1(26,40)
+  ]
+};
+
+function routeStart(){
+  updTotal();
+  const r=Store.getProgress();
+  if(r && STATION_DATA[r.id]) startStation(r.id,r);
+  else renderHub();
+}
+
+$("#soundBtn").addEventListener("click",function(){
+  const on=!Sound.get();Sound.set(on);this.textContent=on?"🔊":"🔇";if(on)Sound.click();
+});
+
+/* ---- Einzelne Frage aus dem Elternbericht üben ------------------------- */
+const TOPIC_ID="oktober-wiederholung";
+let practiceTimer=null;
+function runPractice(stationId, exi){
+  clearTimeout(practiceTimer);
+  const data=STATION_DATA[stationId];
+  const ex = data && data.exercises && data.exercises[+exi];
+  const back=()=>{ clearTimeout(practiceTimer); location.href="../../index.html#report"; };
+  if(!ex){ back(); return; }
+  function goNext(){
+    clearTimeout(practiceTimer);
+    const open=SchoolCloud.openQuestions();
+    if(open.length===0){ back(); return; }
+    const nx=open.filter(q=>q.topic===TOPIC_ID)[0]||open[0];
+    if(nx.topic===TOPIC_ID) runPractice(nx.station, nx.exi);
+    else location.href="../"+nx.topic+"/index.html#practice="+encodeURIComponent(nx.station+":"+nx.exi);
+  }
+  const scr=el("div",{class:"screen"});
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",onclick:back},"← Bericht"));
+  bar.append(el("div",{class:"brand"},el("span",{},"🔁 Üben")));
+  const openNow=SchoolCloud.openQuestions().length;
+  bar.append(el("div",{class:"steplabel"}, openNow>1 ? ("noch "+openNow+" offen") : ((STATIONS.find(s=>s.id===stationId)||{}).n||"")));
+  scr.append(bar);
+  scr.append(mascotRow("Rechne diese Aufgabe noch einmal – du schaffst das! 💪","think"));
+  const host=el("div",{class:"card"}); scr.append(host);
+  const fb=el("div",{class:"feedback"}); scr.append(fb);
+  setScreen(scr);
+  render();
+  function render(){
+    host.innerHTML="";
+    renderExercise(ex, host, {
+      done:(ok)=>{
+        fb.className="feedback show "+(ok?"ok":"no"); fb.innerHTML="";
+        fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+        const msg=el("div"); msg.innerHTML = ok ? "Richtig gerechnet! Klasse! ⭐" : (ex.explain||"Schau nochmal genau hin und probiere es nochmal."); fb.append(msg);
+        if(ok){ Sound.good(); Store.clearStat(stationId, exi);
+          const more = SchoolCloud.openQuestions().length>0;
+          fb.append(el("button",{class:"btn green",style:"margin-left:auto",onclick:goNext}, more?"Weiter →":"✓ Fertig – zum Bericht"));
+          practiceTimer=setTimeout(goNext, 1500);
+        } else { Sound.wrong();
+          fb.append(el("button",{class:"btn blue",style:"margin-left:auto",onclick:()=>{fb.classList.remove("show"); render();}},"Nochmal →"));
+        }
+      },
+      wrong:()=>{}
+    });
+  }
+}
+
+function startHere(){
+  const m=/^#practice=([^:]+):(\d+)$/.exec(decodeURIComponent(location.hash||""));
+  if(m){ history.replaceState(null,"",location.pathname); runPractice(m[1], m[2]); return; }
+  routeStart();
+}
+SchoolCloud.bootSync(startHere);
+
+if("serviceWorker" in navigator){ window.addEventListener("load",()=>navigator.serviceWorker.register("../../sw.js").catch(()=>{})); }
+
+(function clouds(){const b=document.body;for(let i=0;i<4;i++){const c=el("div",{class:"cloud"});
+  c.style.top=(8+i*16)+"%";c.style.width=(60+rnd(0,60))+"px";c.style.height=(20+rnd(0,14))+"px";
+  c.style.animationDuration=(40+rnd(0,40))+"s";c.style.animationDelay=(-rnd(0,40))+"s";b.append(c);}})();
+</script>
+</body>
+</html>

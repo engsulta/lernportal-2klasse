@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Zahlenraupe 🐛 – Zahlenreihen</title>
+<link rel="stylesheet" href="../../shared/styles.css">
+<link rel="manifest" href="../../manifest.webmanifest">
+<meta name="theme-color" content="#7ec8ff">
+<link rel="apple-touch-icon" href="../../icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Lernportal">
+<style>
+.emoji-mascot{display:flex;align-items:center;justify-content:center;font-size:60px;
+  background:#eef4ff;border-radius:50%;box-shadow:var(--shadow-s)}
+.calc{font-size:2.4rem;font-weight:900;text-align:center;margin:6px 0 2px;letter-spacing:1px;color:var(--ink)}
+.calc .op{color:var(--brand-d);margin:0 8px}
+.ansbox{display:inline-block;min-width:96px;font-size:2rem;font-weight:900;text-align:center;
+  background:var(--paper-2);border:3px solid var(--sky-1);border-radius:14px;padding:6px 14px;margin:10px auto;color:var(--ink)}
+.numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:270px;margin:8px auto 0}
+.numkey{font:inherit;font-weight:800;font-size:1.4rem;padding:14px 0;border:none;border-radius:14px;
+  background:#fff;box-shadow:var(--shadow-s);cursor:pointer;color:var(--ink)}
+.numkey:active{transform:translateY(2px)}
+.numkey.ok{background:var(--green);color:#fff}
+.numkey.del{background:#ffe6e6}
+.reihe{font-size:1.25rem;font-weight:800;letter-spacing:1px;color:var(--brand-d);text-align:center;margin-top:8px}
+/* Zahlenkette (wie auf dem Arbeitsblatt: verbundene Kreise) */
+.numchain{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:2px;margin:12px 0}
+.ncircle{width:58px;height:58px;border-radius:50%;border:4px solid #2b5fae;display:flex;align-items:center;
+  justify-content:center;font-weight:900;font-size:1.35rem;background:#fff;color:var(--ink)}
+.ncircle.blank{border-style:dashed;color:var(--brand-d);background:var(--paper-2)}
+.ncircle.active{border-color:var(--brand);box-shadow:0 0 0 4px #ffe0d4}
+.ncircle.done{border-style:solid;border-color:var(--green);background:#e6faf0;color:var(--green-d)}
+.nlink{width:12px;height:5px;background:#b9cce0;border-radius:3px}
+@media (max-width:520px){ .ncircle{width:48px;height:48px;font-size:1.1rem} .nlink{width:7px} }
+</style>
+</head>
+<body>
+<canvas id="confetti"></canvas>
+
+<div id="app">
+  <div class="topbar">
+    <div class="brand"><span class="logo">🐛</span><span>Zahlenraupe</span></div>
+    <div class="score"><span class="star">★</span><span id="totalStars">0</span></div>
+    <button class="iconbtn" id="soundBtn" title="Ton an/aus">🔊</button>
+  </div>
+  <div id="screen"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="../../shared/config.js"></script>
+<script src="../../shared/cloud.js"></script>
+<script>
+"use strict";
+
+const $  = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
+function el(tag, attrs={}, ...kids){
+  const n=document.createElement(tag);
+  for(const k in attrs){
+    if(k==="class") n.className=attrs[k];
+    else if(k==="html") n.innerHTML=attrs[k];
+    else if(k.startsWith("on")&&typeof attrs[k]==="function") n.addEventListener(k.slice(2),attrs[k]);
+    else if(attrs[k]!=null) n.setAttribute(k,attrs[k]);
+  }
+  for(const c of kids){ if(c==null) continue; n.append(c.nodeType?c:document.createTextNode(c)); }
+  return n;
+}
+const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=rnd(0,i);[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+const Sound=(()=>{
+  let ctx=null, on=true;
+  function ac(){ if(!ctx) ctx=new (window.AudioContext||window.webkitAudioContext)();
+    if(ctx.state==="suspended"){ ctx.resume(); } return ctx; }
+  ["pointerdown","touchstart","keydown","click"].forEach(ev=>
+    window.addEventListener(ev,()=>{ try{ ac(); }catch(e){} },{passive:true}));
+  function tone(f,t,dur,type="sine",vol=.18){
+    if(!on) return; const c=ac(); const o=c.createOscillator(),g=c.createGain();
+    o.type=type;o.frequency.setValueAtTime(f,t);o.connect(g);g.connect(c.destination);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.01);
+    g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.start(t);o.stop(t+dur);
+  }
+  return {
+    set(v){on=v;}, get(){return on;},
+    click(){if(!on)return;const t=ac().currentTime;tone(440,t,.06,"triangle",.10);},
+    good(){if(!on)return;const t=ac().currentTime;[523,659,784].forEach((f,i)=>tone(f,t+i*.09,.18,"sine",.16));},
+    wrong(){if(!on)return;const t=ac().currentTime;tone(280,t,.18,"sawtooth",.1);tone(200,t+.12,.22,"sawtooth",.1);},
+    win(){if(!on)return;const t=ac().currentTime;[523,587,659,784,880,1046].forEach((f,i)=>tone(f,t+i*.12,.3,"triangle",.16));}
+  };
+})();
+
+const Confetti=(()=>{
+  const cv=$("#confetti"),cx=cv.getContext("2d");let parts=[],raf=null;
+  function size(){cv.width=innerWidth;cv.height=innerHeight;}
+  addEventListener("resize",size);
+  const COL=["#ff7a59","#ffd23f","#36c98d","#3aa0ff","#9b6bff","#ff79c6"];
+  function burst(n=160){
+    size();cv.style.display="block";
+    for(let i=0;i<n;i++)parts.push({x:innerWidth/2+rnd(-60,60),y:innerHeight/3,
+      vx:rnd(-90,90)/10,vy:rnd(-150,-40)/10,g:.18+Math.random()*.12,
+      s:rnd(6,13),c:pick(COL),r:Math.random()*6,vr:(Math.random()-.5)*.5,life:rnd(80,140)});
+    if(!raf)loop();
+  }
+  function loop(){
+    cx.clearRect(0,0,cv.width,cv.height);
+    parts.forEach(p=>{p.vy+=p.g;p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;p.life--;
+      cx.save();cx.translate(p.x,p.y);cx.rotate(p.r);cx.fillStyle=p.c;
+      cx.fillRect(-p.s/2,-p.s/2,p.s,p.s*.6);cx.restore();});
+    parts=parts.filter(p=>p.life>0&&p.y<cv.height+30);
+    if(parts.length)raf=requestAnimationFrame(loop);
+    else{raf=null;cv.style.display="none";}
+  }
+  return {burst};
+})();
+
+const toast=SchoolCloud.toast;
+
+const Store = SchoolCloud.store("zahlenreihen");
+const Cloud = { ready: SchoolCloud.ready };
+function renderCodeScreen(firstRun){ SchoolCloud.showCodeScreen(firstRun, routeStart); }
+
+function mascotRow(text,mood="happy"){
+  const row=el("div",{class:"mascot-row"});
+  const face = mood==="cheer"?"🐛🎉":mood==="think"?"🐛🤔":"🐛";
+  row.append(el("div",{class:"mascot emoji-mascot"},face));
+  row.append(el("div",{class:"bubble",html:text}));
+  return row;
+}
+function setScreen(node){const s=$("#screen");s.innerHTML="";s.append(node);window.scrollTo(0,0);}
+function updTotal(){const e=$("#totalStars");if(e)e.textContent=Store.total();}
+
+/* =========================================================================
+   STATIONEN
+   ========================================================================= */
+const STATIONS=[
+  {id:"vor",     n:"Vorwärts +1, +2",      e:"🐣", c:"--green"},
+  {id:"rueck",   n:"Rückwärts −1, −2",     e:"🔙", c:"--blue"},
+  {id:"fuenf",   n:"5er- & 10er-Schritte",  e:"🖐️", c:"--purple"},
+  {id:"mitte",   n:"Lücke in der Mitte",    e:"🧩", c:"--pink"},
+  {id:"gross",   n:"Größere Schritte",      e:"🧗", c:"--brand"},
+  {id:"mal",     n:"Mal-Reihen",            e:"✖️", c:"--blue"},
+  {id:"meister", n:"Reihen-Meister",        e:"🏆", c:"--gold", master:true}
+];
+
+function renderHub(){
+  updTotal();
+  const wrap=el("div",{class:"screen"});
+  wrap.append(el("h1",{class:"hub-title"},"🔢 Zahlenreihen"));
+  wrap.append(el("div",{class:"hub-sub"},"Zahlenreihen fortsetzen – von leicht bis knifflig"));
+  wrap.append(mascotRow("Hallo! Ich bin <b>Rudi die Zahlenraupe</b> 🐛. Finde heraus, wie die Reihe weitergeht – welche Zahl fehlt? 🔎"));
+
+  const prog=Store.getProgress();
+  if(prog && STATION_DATA[prog.id]){
+    const ps=STATIONS.find(x=>x.id===prog.id);
+    const cont=el("div",{class:"center",style:"margin:2px 0 12px"});
+    cont.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();startStation(prog.id,prog);}},
+      "▶ Weitermachen: "+(ps?ps.n:"")+" – Aufgabe "+((prog.i||0)+1)));
+    wrap.append(cont);
+  }
+
+  const grid=el("div",{class:"stations"});
+  let prevDone=true;
+  STATIONS.forEach((s,i)=>{
+    const stars=Store.stars(s.id), done=Store.data.done[s.id];
+    const locked = !prevDone && !done;
+    const card=el("div",{class:"station"+(s.master?" master":"")+(done?" done":"")+(locked?" locked":"")});
+    card.style.borderColor = done? "var(--gold)":"transparent";
+    card.append(el("span",{class:"num"},String(i+1)));
+    card.append(el("span",{class:"emoji"},s.e));
+    card.append(el("div",{class:"nm"},s.n));
+    const sd=el("div",{class:"stars"});
+    for(let k=0;k<3;k++)sd.append(el("span",{class:"s"+(k<stars?" on":"")},"★"));
+    card.append(sd);
+    if(!locked) card.addEventListener("click",()=>{Sound.click();startStation(s.id);});
+    grid.append(card);
+    prevDone = done;
+  });
+  wrap.append(grid);
+
+  const foot=el("div",{class:"center",style:"margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  foot.append(el("button",{class:"btn gray",onclick:()=>{location.href="../../index.html";}},"← Themen"));
+  foot.append(el("button",{class:"btn gray",onclick:()=>{
+      if(confirm("Fortschritt in diesem Thema zurücksetzen?")){Store.reset();renderHub();}
+    }},"↺ Neu starten"));
+  if(Cloud.ready()){
+    foot.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();renderCodeScreen(false);}},
+      "☁️ Code: "+(SchoolCloud.code()||"—")));
+  }
+  wrap.append(foot);
+  setScreen(wrap);
+}
+
+function stationHeader(id,step){
+  const s=STATIONS.find(x=>x.id===id);
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",
+    onclick:()=>{Sound.click();renderHub();}},"← Karte"));
+  bar.append(el("div",{class:"brand"},el("span",{},s.e+" "+s.n)));
+  bar.append(el("div",{class:"steplabel"},step||""));
+  return bar;
+}
+
+function startStation(id,resume){
+  const data=STATION_DATA[id];
+  if(!data){toast("Diese Station wird noch gebaut …");return;}
+  const teach=data.teach||[];
+  const exercises=data.exercises||[];
+  let ti=0;
+  if(resume){ runExercises(id,exercises,resume); return; }
+  if(teach.length) showTeach(); else runExercises(id,exercises);
+
+  function showTeach(){
+    const card=teach[ti];
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id,"Erklärung "+(ti+1)+"/"+teach.length));
+    const body=el("div",{class:"card"});
+    if(card.render){ card.render(body); }
+    else {
+      if(card.title) body.append(el("h2",{class:"center"},card.title));
+      if(card.html)  body.append(el("div",{class:"center",html:card.html}));
+    }
+    scr.append(card.mascot? mascotRow(card.mascot,card.mood||"think"):document.createTextNode(""));
+    scr.append(body);
+    const nav=el("div",{class:"center",style:"margin-top:8px"});
+    nav.append(el("button",{class:"btn lg green",onclick:()=>{
+      Sound.click(); ti++;
+      if(ti<teach.length) showTeach(); else runExercises(id,exercises);
+    }}, ti<teach.length-1?"Weiter →":"Los, üben! 🐛"));
+    scr.append(nav);
+    setScreen(scr);
+  }
+}
+
+function runExercises(id,list,resume){
+  let i=resume && resume.i<list.length ? resume.i : 0,
+      wrongTotal=resume ? resume.wrongTotal||0 : 0;
+  const stName=()=>(STATIONS.find(s=>s.id===id)||{}).n;
+  const exLbl=()=>list[i] ? (list[i].q||("Aufgabe "+(i+1))) : "";
+  const logWrong=()=>Store.recordWrong(id,i,exLbl(),stName());
+  next();
+
+  function next(){
+    if(i>=list.length){ return finish(); }
+    Store.saveProgress({id, i, wrongTotal});
+    const ex=list[i];
+    Store.recordSeen(id,i,exLbl(),stName());
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id));
+    const pr=el("div",{class:"card"});
+    const bar=el("div",{class:"progress"});const fill=el("i");bar.append(fill);
+    pr.append(bar);
+    fill.style.width=(i/list.length*100)+"%";
+    pr.append(el("div",{class:"steplabel"},"Aufgabe "+(i+1)+" von "+list.length));
+    scr.append(pr);
+
+    const host=el("div",{class:"card"});
+    scr.append(host);
+    const fb=el("div",{class:"feedback"});scr.append(fb);
+    setScreen(scr);
+
+    const api={
+      done:(ok)=>{ if(ok){ fill.style.width=((i+1)/list.length*100)+"%"; }
+        afterAnswer(ok,ex,fb,()=>{ i++; next(); }); },
+      wrong:()=>{ wrongTotal++; logWrong(); }
+    };
+    renderExercise(ex,host,api);
+  }
+
+  function afterAnswer(ok,ex,fb,cont){
+    fb.className="feedback show "+(ok?"ok":"no");
+    fb.innerHTML="";
+    fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+    const msg=el("div");
+    msg.innerHTML = ok ? pick(["Super!","Richtig! ⭐","Klasse!","Genau!","Stark gerechnet!"])
+                       : (ex.explain||"Schau nochmal genau hin und probiere es nochmal.");
+    fb.append(msg);
+    if(ok)Sound.good(); else Sound.wrong();
+    if(ok){
+      fb.append(el("button",{class:"btn green",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");cont();}},"Weiter →"));
+    }else{
+      fb.append(el("button",{class:"btn blue",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");retry();}},"Nochmal →"));
+    }
+    function retry(){
+      const host=fb.previousSibling;
+      host.innerHTML=""; renderExercise(ex,host,{
+        done:(ok2)=>{ afterAnswer(ok2,ex,fb,()=>{i++;next();}); },
+        wrong:()=>{wrongTotal++; logWrong();}
+      });
+    }
+  }
+
+  function finish(){
+    Store.clearProgress();
+    let stars = wrongTotal===0?3 : (wrongTotal<=2?2:1);
+    Store.setStars(id,stars); updTotal();
+    const isMaster = id==="meister";
+    const scr=el("div",{class:"result screen"});
+    scr.append(stationHeader(id,"Geschafft!"));
+    const card=el("div",{class:"card center"});
+    card.append(el("div",{class:"huge"}, isMaster?"🏆 REIHEN-MEISTER! 🏆":"Geschafft! 🎉"));
+    const st=el("div",{class:"bigstars"});
+    for(let k=0;k<3;k++)st.append(el("span",{class:"s"},"★"));
+    card.append(st);
+    card.append(el("p",{class:"big"}, stars===3?"Perfekt – alles richtig!":stars===2?"Sehr gut gerechnet!":"Geschafft – Übung macht den Meister!"));
+    if(isMaster){
+      card.append(el("div",{class:"badge"},"🏅"));
+      card.append(el("p",{html:"Du bist ein echter <b>Reihen-Meister</b>! Du erkennst jeden Schritt. 🐛"}));
+    }
+    const nav=el("div",{style:"margin-top:10px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+    nav.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();renderHub();}},"🗺️ Zur Karte"));
+    nav.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();startStation(id);}},"↻ Nochmal"));
+    const idx=STATIONS.findIndex(s=>s.id===id);
+    if(idx<STATIONS.length-1){
+      nav.append(el("button",{class:"btn",onclick:()=>{Sound.click();startStation(STATIONS[idx+1].id);}},"Nächste Station →"));
+    }
+    card.append(nav);
+    scr.append(card);
+    setScreen(scr);
+    setTimeout(()=>{ const ss=$$(".bigstars .s");
+      for(let k=0;k<stars;k++)setTimeout(()=>{ss[k].classList.add("on");Sound.good();},k*350);
+    },200);
+    if(stars>=3||isMaster){Confetti.burst(isMaster?240:160);Sound.win();}
+    else if(stars===2){Confetti.burst(90);Sound.good();}
+  }
+}
+
+/* =========================================================================
+   RENDERER  (calc mit Ziffernblock)
+   ========================================================================= */
+function renderExercise(ex,host,api){ (RENDER[ex.type]||RENDER.calc)(ex,host,api); }
+const RENDER={};
+
+function numpad(host, answer, api){
+  const disp=el("div",{class:"ansbox"},"?");
+  let cur="";
+  const upd=()=>{ disp.textContent = cur===""?"?":cur; };
+  host.append(el("div",{class:"center"}, disp));
+  const pad=el("div",{class:"numpad"});
+  ["1","2","3","4","5","6","7","8","9","⌫","0","✓"].forEach(k=>{
+    const cls="numkey"+(k==="✓"?" ok":k==="⌫"?" del":"");
+    pad.append(el("button",{class:cls,onclick:()=>{ Sound.click();
+      if(k==="⌫"){ cur=cur.slice(0,-1); upd(); }
+      else if(k==="✓"){
+        if(cur===""){ toast("Gib zuerst eine Zahl ein"); return; }
+        if(parseInt(cur,10)===answer){ api.done(true); }
+        else { api.wrong(); api.done(false); }
+      } else { if(cur.length<4){ cur+=k; upd(); } }
+    }},k));
+  });
+  host.append(pad);
+}
+
+RENDER.calc=(ex,host,api)=>{
+  const eq=el("div",{class:"calc"});
+  eq.append(document.createTextNode(ex.a+" "));
+  eq.append(el("span",{class:"op"},ex.op||"·"));
+  eq.append(document.createTextNode(" "+ex.b+" = "));
+  host.append(eq);
+  numpad(host, (ex.answer!=null?ex.answer:ex.a*ex.b), api);
+};
+
+RENDER.mc=(ex,host,api)=>{
+  host.append(el("div",{class:"center big",style:"margin-bottom:10px",html:ex.q}));
+  const box=el("div",{class:"center",style:"display:flex;flex-direction:column;gap:10px;align-items:center"});
+  shuffle(ex.options).forEach(o=>{
+    box.append(el("button",{class:"btn lg",html:o.label,onclick:function(){
+      if(o.ok){ this.classList.add("green"); Sound.click(); api.done(true); }
+      else{ this.classList.add("gray"); this.setAttribute("disabled",""); Sound.wrong(); api.wrong(); api.done(false); }
+    }}));
+  });
+  host.append(box);
+};
+
+/* Zahlenreihe: verbundene Kreise wie auf dem Arbeitsblatt. Eine (oder mehrere)
+   Lücke(n) werden von links nach rechts mit dem Ziffernblock gefüllt. */
+RENDER.reihe=(ex,host,api)=>{
+  const seq=ex.seq.slice();
+  const blanks=[]; seq.forEach((v,i)=>{ if(v===null) blanks.push(i); });
+  const answers=ex.answers||[ex.answer];
+  const filled={}; let cur=0;
+  const chainHost=el("div",{class:"center"}); host.append(chainHost);
+  host.append(el("div",{class:"center muted",style:"margin:2px 0 6px;font-size:1.1rem"},
+    blanks.length>1?"Welche Zahl fehlt? (die orange Lücke)":"Welche Zahl fehlt?"));
+  const padHost=el("div"); host.append(padHost);
+  function draw(){
+    chainHost.innerHTML="";
+    const row=el("div",{class:"numchain"});
+    seq.forEach((v,i)=>{
+      let txt,cls="ncircle";
+      if(v===null){
+        if(filled[i]!=null){ txt=String(filled[i]); cls+=" done"; }
+        else { txt="?"; cls+=" blank"; if(i===blanks[cur]) cls+=" active"; }
+      } else txt=String(v);
+      row.append(el("div",{class:cls}, txt));
+      if(i<seq.length-1) row.append(el("div",{class:"nlink"}));
+    });
+    chainHost.append(row);
+  }
+  function pad(){
+    padHost.innerHTML="";
+    const disp=el("div",{class:"ansbox"},"?"); let s="";
+    const upd=()=>{ disp.textContent = s===""?"?":s; };
+    padHost.append(el("div",{class:"center"}, disp));
+    const p=el("div",{class:"numpad"});
+    ["1","2","3","4","5","6","7","8","9","⌫","0","✓"].forEach(k=>{
+      const cls="numkey"+(k==="✓"?" ok":k==="⌫"?" del":"");
+      p.append(el("button",{class:cls,onclick:()=>{ Sound.click();
+        if(k==="⌫"){ s=s.slice(0,-1); upd(); }
+        else if(k==="✓"){ if(s===""){ toast("Gib zuerst eine Zahl ein"); return; }
+          if(parseInt(s,10)===answers[cur]){
+            filled[blanks[cur]]=answers[cur]; cur++; draw();
+            if(cur>=blanks.length){ api.done(true); } else { Sound.good(); pad(); }
+          } else { api.wrong(); api.done(false); }
+        } else { if(s.length<4){ s+=k; upd(); } }
+      }},k));
+    });
+    padHost.append(p);
+  }
+  draw(); pad();
+};
+
+/* =========================================================================
+   INHALTE  (Zahlenreihen – von leicht bis knifflig)
+   ========================================================================= */
+const STATION_DATA={};
+/* arithmetische Reihe: Start, Schritt, Anzahl, Lücken-Positionen */
+function reiheGen(start,step,count,blankIdxs,note){
+  const full=[]; for(let i=0;i<count;i++) full.push(start+i*step);
+  const seq=full.slice(), answers=[];
+  blankIdxs.forEach(bi=>{ answers.push(full[bi]); seq[bi]=null; });
+  const dir = step>0 ? ("+"+step) : ("−"+Math.abs(step));
+  return {type:"reihe", seq, answers, q:"Reihe: "+full.join(", "),
+    explain: note || ("Die Reihe geht immer <b>"+dir+"</b>.")};
+}
+/* freie Reihe (z. B. Verdopplung): volle Zahlen + Lücken-Positionen */
+function reiheSeq(full,blankIdxs,note){
+  const seq=full.slice(), answers=[];
+  blankIdxs.forEach(bi=>{ answers.push(full[bi]); seq[bi]=null; });
+  return {type:"reihe", seq, answers, q:"Reihe: "+full.join(", "), explain: note||""};
+}
+const mult=(a,b,explain)=>({type:"calc", q:a+" · "+b+" = ?", a, b, op:"·", answer:a*b,
+  explain: explain || (a+" · "+b+" = <b>"+(a*b)+"</b>.")});
+
+/* 1) Vorwärts +1, +2 */
+STATION_DATA.vor={
+  teach:[{ mascot:"Bei einer <b>Zahlenreihe</b> kommt immer <b>gleich viel</b> dazu. Schau von einer Zahl zur nächsten: wie viel mehr? Dann rechnest du weiter.",
+    render(b){ b.append(el("h2",{class:"center"},"Vorwärts +1, +2 🐣"));
+      b.append(el("div",{class:"reihe"},"3, 4, 5, 6, ? → immer +1")); } }],
+  exercises:[
+    reiheGen(3,1,5,[4]), reiheGen(11,1,5,[4]), reiheGen(2,2,5,[4]), reiheGen(10,2,5,[4]),
+    reiheGen(5,1,5,[3]), reiheGen(4,2,5,[3]), reiheGen(1,2,6,[5]), reiheGen(6,1,6,[5])
+  ]
+};
+/* 2) Rückwärts −1, −2 */
+STATION_DATA.rueck={
+  teach:[{ mascot:"Reihen können auch <b>rückwärts</b> gehen! Dann wird es immer <b>weniger</b>. Schau, wie viel jedes Mal <b>abgezogen</b> wird.",
+    render(b){ b.append(el("h2",{class:"center"},"Rückwärts −1, −2 🔙"));
+      b.append(el("div",{class:"reihe"},"9, 8, 7, 6, ? → immer −1")); } }],
+  exercises:[
+    reiheGen(9,-1,5,[4]), reiheGen(20,-2,5,[4]), reiheGen(15,-1,5,[4]), reiheGen(30,-2,5,[3]),
+    reiheGen(19,-2,5,[4]), reiheGen(12,-1,6,[5]), reiheGen(24,-2,5,[2]), reiheGen(18,-3,5,[4])
+  ]
+};
+/* 3) 5er- & 10er-Schritte (bis 100) */
+STATION_DATA.fuenf={
+  teach:[{ mascot:"Jetzt <b>größere Sprünge</b>: <b>+5</b> und <b>+10</b> (auch rückwärts). Zähle in Fünfer- und Zehnerschritten.",
+    render(b){ b.append(el("h2",{class:"center"},"5er- & 10er-Schritte 🖐️"));
+      b.append(el("div",{class:"reihe"},"5, 10, 15, 20, ?  ·  100, 90, 80, ?")); } }],
+  exercises:[
+    reiheGen(5,5,5,[4]), reiheGen(10,10,5,[4]), reiheGen(50,-5,5,[4]), reiheGen(100,-10,5,[4]),
+    reiheGen(25,5,5,[3]), reiheGen(20,10,5,[2]), reiheGen(65,5,5,[4]), reiheGen(90,-10,5,[3])
+  ]
+};
+/* 4) Lücke in der Mitte / am Anfang (wie das Arbeitsblatt) */
+STATION_DATA.mitte={
+  teach:[{ mascot:"Manchmal fehlt die Zahl <b>in der Mitte</b> oder <b>am Anfang</b>. Finde den Schritt aus den Nachbarzahlen – dann füllst du die Lücke.",
+    render(b){ b.append(el("h2",{class:"center"},"Lücke in der Mitte 🧩"));
+      b.append(el("div",{class:"reihe"},"30, ?, 40, 45, 50 → +5")); } }],
+  exercises:[
+    reiheGen(30,5,5,[1]), reiheGen(50,10,5,[0]), reiheGen(48,-4,5,[2]), reiheGen(63,3,5,[3]),
+    reiheGen(85,-5,5,[1]), reiheGen(12,6,5,[2]), reiheGen(40,5,6,[0,3]), reiheGen(21,3,5,[1,3])
+  ]
+};
+/* 5) Größere Schritte (2-stellig, + und −) */
+STATION_DATA.gross={
+  teach:[{ mascot:"Jetzt wird's <b>knifflig</b>: die Schritte sind größer (z. B. +3, +6, −7). Rechne genau von einer Zahl zur nächsten.",
+    render(b){ b.append(el("h2",{class:"center"},"Größere Schritte 🧗"));
+      b.append(el("div",{class:"reihe"},"24, 27, 30, 33, ? → +3")); } }],
+  exercises:[
+    reiheGen(24,3,5,[4]), reiheGen(88,-4,5,[4]), reiheGen(15,6,5,[4]), reiheGen(60,-7,5,[4]),
+    reiheGen(33,4,5,[3]), reiheGen(72,-6,5,[2]), reiheGen(9,7,5,[4]), reiheGen(100,-8,5,[4])
+  ]
+};
+/* 6) Mal-Reihen (Einmaleins-Reihen & Verdopplung) */
+STATION_DATA.mal={
+  teach:[{ mascot:"<b>Mal-Reihen!</b> Die Einmaleins-Reihen sind auch Zahlenreihen: 2, 4, 6, 8 … (immer +2 = die 2er-Reihe). Und die <b>Verdopplung</b>: 1, 2, 4, 8 … (immer <b>·2</b>).",
+    render(b){ b.append(el("h2",{class:"center"},"Mal-Reihen ✖️"));
+      b.append(el("div",{class:"reihe"},"3, 6, 9, 12, ?  ·  1, 2, 4, 8, ?")); } }],
+  exercises:[
+    reiheGen(2,2,6,[5],"Die <b>2er-Reihe</b>: 2, 4, 6, 8, 10, 12 …"),
+    reiheGen(3,3,5,[4],"Die <b>3er-Reihe</b>: 3, 6, 9, 12, 15 …"),
+    reiheGen(5,5,6,[5],"Die <b>5er-Reihe</b>: 5, 10, 15, 20, 25, 30 …"),
+    reiheGen(4,4,5,[4],"Die <b>4er-Reihe</b>: 4, 8, 12, 16, 20 …"),
+    reiheGen(7,7,5,[4],"Die <b>7er-Reihe</b>: 7, 14, 21, 28, 35 …"),
+    reiheGen(10,10,6,[5],"Die <b>10er-Reihe</b>: 10, 20, 30, 40, 50, 60 …"),
+    reiheSeq([1,2,4,8,16,32],[5],"<b>Verdopplung</b>: immer <b>·2</b> (das Doppelte). 16 · 2 = 32."),
+    reiheSeq([3,6,12,24,48],[4],"<b>Verdopplung</b>: immer <b>·2</b>. 24 · 2 = 48.")
+  ]
+};
+/* 7) Meister: alles gemischt */
+STATION_DATA.meister={
+  teach:[{ mascot:"Jetzt <b>alles gemischt</b> – vorwärts, rückwärts, große Schritte und Mal-Reihen. Zeig, dass du ein <b>Reihen-Meister</b> bist! 🏆", mood:"cheer",
+    render(b){ b.append(el("h2",{class:"center"},"🏆 Reihen-Meister 🏆"));
+      b.append(el("div",{class:"center big"},"Reihen aus allen Stationen.")); } }],
+  exercises:[
+    reiheGen(6,6,5,[4]), reiheGen(95,-5,5,[2]), reiheSeq([2,4,8,16,32],[4],"Verdopplung: immer ·2."),
+    reiheGen(40,8,5,[3]), reiheGen(28,-4,6,[0,4]), reiheGen(9,9,5,[4],"Die 9er-Reihe: 9, 18, 27, 36, 45 …"),
+    reiheGen(63,-7,5,[3]), reiheSeq([5,10,20,40,80],[4],"Verdopplung: immer ·2.")
+  ]
+};
+
+function routeStart(){
+  updTotal();
+  const r=Store.getProgress();
+  if(r && STATION_DATA[r.id]) startStation(r.id,r);
+  else renderHub();
+}
+
+$("#soundBtn").addEventListener("click",function(){
+  const on=!Sound.get();Sound.set(on);this.textContent=on?"🔊":"🔇";if(on)Sound.click();
+});
+
+/* ---- Einzelne Frage aus dem Elternbericht üben ------------------------- */
+const TOPIC_ID="zahlenreihen";
+let practiceTimer=null;
+function runPractice(stationId, exi){
+  clearTimeout(practiceTimer);
+  const data=STATION_DATA[stationId];
+  const ex = data && data.exercises && data.exercises[+exi];
+  const back=()=>{ clearTimeout(practiceTimer); location.href="../../index.html#report"; };
+  if(!ex){ back(); return; }
+  function goNext(){
+    clearTimeout(practiceTimer);
+    const open=SchoolCloud.openQuestions();
+    if(open.length===0){ back(); return; }
+    const nx=open.filter(q=>q.topic===TOPIC_ID)[0]||open[0];
+    if(nx.topic===TOPIC_ID) runPractice(nx.station, nx.exi);
+    else location.href="../"+nx.topic+"/index.html#practice="+encodeURIComponent(nx.station+":"+nx.exi);
+  }
+  const scr=el("div",{class:"screen"});
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",onclick:back},"← Bericht"));
+  bar.append(el("div",{class:"brand"},el("span",{},"🔁 Üben")));
+  const openNow=SchoolCloud.openQuestions().length;
+  bar.append(el("div",{class:"steplabel"}, openNow>1 ? ("noch "+openNow+" offen") : ((STATIONS.find(s=>s.id===stationId)||{}).n||"")));
+  scr.append(bar);
+  scr.append(mascotRow("Rechne diese Aufgabe noch einmal – du schaffst das! 💪","think"));
+  const host=el("div",{class:"card"}); scr.append(host);
+  const fb=el("div",{class:"feedback"}); scr.append(fb);
+  setScreen(scr);
+  render();
+  function render(){
+    host.innerHTML="";
+    renderExercise(ex, host, {
+      done:(ok)=>{
+        fb.className="feedback show "+(ok?"ok":"no"); fb.innerHTML="";
+        fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+        const msg=el("div"); msg.innerHTML = ok ? "Richtig gerechnet! Klasse! ⭐" : (ex.explain||"Schau nochmal genau hin und probiere es nochmal."); fb.append(msg);
+        if(ok){ Sound.good(); Store.clearStat(stationId, exi);
+          const more = SchoolCloud.openQuestions().length>0;
+          fb.append(el("button",{class:"btn green",style:"margin-left:auto",onclick:goNext}, more?"Weiter →":"✓ Fertig – zum Bericht"));
+          practiceTimer=setTimeout(goNext, 1500);
+        } else { Sound.wrong();
+          fb.append(el("button",{class:"btn blue",style:"margin-left:auto",onclick:()=>{fb.classList.remove("show"); render();}},"Nochmal →"));
+        }
+      },
+      wrong:()=>{}
+    });
+  }
+}
+
+function startHere(){
+  const m=/^#practice=([^:]+):(\d+)$/.exec(decodeURIComponent(location.hash||""));
+  if(m){ history.replaceState(null,"",location.pathname); runPractice(m[1], m[2]); return; }
+  routeStart();
+}
+SchoolCloud.bootSync(startHere);
+
+if("serviceWorker" in navigator){ window.addEventListener("load",()=>navigator.serviceWorker.register("../../sw.js").catch(()=>{})); }
+
+(function clouds(){const b=document.body;for(let i=0;i<4;i++){const c=el("div",{class:"cloud"});
+  c.style.top=(8+i*16)+"%";c.style.width=(60+rnd(0,60))+"px";c.style.height=(20+rnd(0,14))+"px";
+  c.style.animationDuration=(40+rnd(0,40))+"s";c.style.animationDelay=(-rnd(0,40))+"s";b.append(c);}})();
+</script>
+</body>
+</html>
