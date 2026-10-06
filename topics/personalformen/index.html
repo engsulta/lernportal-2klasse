@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Wortzauberer 🗣️ – Personalformen</title>
+<link rel="stylesheet" href="../../shared/styles.css">
+<link rel="manifest" href="../../manifest.webmanifest">
+<meta name="theme-color" content="#7ec8ff">
+<link rel="apple-touch-icon" href="../../icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Lernportal">
+<style>
+.emoji-mascot{display:flex;align-items:center;justify-content:center;font-size:60px;
+  background:#eef4ff;border-radius:50%;box-shadow:var(--shadow-s)}
+.calc{font-size:2.4rem;font-weight:900;text-align:center;margin:6px 0 2px;letter-spacing:1px;color:var(--ink)}
+.calc .op{color:var(--brand-d);margin:0 8px}
+.ansbox{display:inline-block;min-width:96px;font-size:2rem;font-weight:900;text-align:center;
+  background:var(--paper-2);border:3px solid var(--sky-1);border-radius:14px;padding:6px 14px;margin:10px auto;color:var(--ink)}
+.numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:270px;margin:8px auto 0}
+.numkey{font:inherit;font-weight:800;font-size:1.4rem;padding:14px 0;border:none;border-radius:14px;
+  background:#fff;box-shadow:var(--shadow-s);cursor:pointer;color:var(--ink)}
+.numkey:active{transform:translateY(2px)}
+.numkey.ok{background:var(--green);color:#fff}
+.numkey.del{background:#ffe6e6}
+.reihe{font-size:1.25rem;font-weight:800;letter-spacing:1px;color:var(--brand-d);text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+<canvas id="confetti"></canvas>
+
+<div id="app">
+  <div class="topbar">
+    <div class="brand"><span class="logo">🗣️</span><span>Personalformen</span></div>
+    <div class="score"><span class="star">★</span><span id="totalStars">0</span></div>
+    <button class="iconbtn" id="soundBtn" title="Ton an/aus">🔊</button>
+  </div>
+  <div id="screen"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="../../shared/config.js"></script>
+<script src="../../shared/cloud.js"></script>
+<script>
+"use strict";
+
+const $  = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
+function el(tag, attrs={}, ...kids){
+  const n=document.createElement(tag);
+  for(const k in attrs){
+    if(k==="class") n.className=attrs[k];
+    else if(k==="html") n.innerHTML=attrs[k];
+    else if(k.startsWith("on")&&typeof attrs[k]==="function") n.addEventListener(k.slice(2),attrs[k]);
+    else if(attrs[k]!=null) n.setAttribute(k,attrs[k]);
+  }
+  for(const c of kids){ if(c==null) continue; n.append(c.nodeType?c:document.createTextNode(c)); }
+  return n;
+}
+const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=rnd(0,i);[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+const Sound=(()=>{
+  let ctx=null, on=true;
+  function ac(){ if(!ctx) ctx=new (window.AudioContext||window.webkitAudioContext)();
+    if(ctx.state==="suspended"){ ctx.resume(); } return ctx; }
+  ["pointerdown","touchstart","keydown","click"].forEach(ev=>
+    window.addEventListener(ev,()=>{ try{ ac(); }catch(e){} },{passive:true}));
+  function tone(f,t,dur,type="sine",vol=.18){
+    if(!on) return; const c=ac(); const o=c.createOscillator(),g=c.createGain();
+    o.type=type;o.frequency.setValueAtTime(f,t);o.connect(g);g.connect(c.destination);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol,t+.01);
+    g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.start(t);o.stop(t+dur);
+  }
+  return {
+    set(v){on=v;}, get(){return on;},
+    click(){if(!on)return;const t=ac().currentTime;tone(440,t,.06,"triangle",.10);},
+    good(){if(!on)return;const t=ac().currentTime;[523,659,784].forEach((f,i)=>tone(f,t+i*.09,.18,"sine",.16));},
+    wrong(){if(!on)return;const t=ac().currentTime;tone(280,t,.18,"sawtooth",.1);tone(200,t+.12,.22,"sawtooth",.1);},
+    win(){if(!on)return;const t=ac().currentTime;[523,587,659,784,880,1046].forEach((f,i)=>tone(f,t+i*.12,.3,"triangle",.16));}
+  };
+})();
+
+const Confetti=(()=>{
+  const cv=$("#confetti"),cx=cv.getContext("2d");let parts=[],raf=null;
+  function size(){cv.width=innerWidth;cv.height=innerHeight;}
+  addEventListener("resize",size);
+  const COL=["#ff7a59","#ffd23f","#36c98d","#3aa0ff","#9b6bff","#ff79c6"];
+  function burst(n=160){
+    size();cv.style.display="block";
+    for(let i=0;i<n;i++)parts.push({x:innerWidth/2+rnd(-60,60),y:innerHeight/3,
+      vx:rnd(-90,90)/10,vy:rnd(-150,-40)/10,g:.18+Math.random()*.12,
+      s:rnd(6,13),c:pick(COL),r:Math.random()*6,vr:(Math.random()-.5)*.5,life:rnd(80,140)});
+    if(!raf)loop();
+  }
+  function loop(){
+    cx.clearRect(0,0,cv.width,cv.height);
+    parts.forEach(p=>{p.vy+=p.g;p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;p.life--;
+      cx.save();cx.translate(p.x,p.y);cx.rotate(p.r);cx.fillStyle=p.c;
+      cx.fillRect(-p.s/2,-p.s/2,p.s,p.s*.6);cx.restore();});
+    parts=parts.filter(p=>p.life>0&&p.y<cv.height+30);
+    if(parts.length)raf=requestAnimationFrame(loop);
+    else{raf=null;cv.style.display="none";}
+  }
+  return {burst};
+})();
+
+const toast=SchoolCloud.toast;
+
+const Store = SchoolCloud.store("personalformen");
+const Cloud = { ready: SchoolCloud.ready };
+function renderCodeScreen(firstRun){ SchoolCloud.showCodeScreen(firstRun, routeStart); }
+
+function mascotRow(text,mood="happy"){
+  const row=el("div",{class:"mascot-row"});
+  const face = mood==="cheer"?"🧙🎉":mood==="think"?"🧙🤔":"🧙";
+  row.append(el("div",{class:"mascot emoji-mascot"},face));
+  row.append(el("div",{class:"bubble",html:text}));
+  return row;
+}
+function setScreen(node){const s=$("#screen");s.innerHTML="";s.append(node);window.scrollTo(0,0);}
+function updTotal(){const e=$("#totalStars");if(e)e.textContent=Store.total();}
+
+/* =========================================================================
+   STATIONEN
+   ========================================================================= */
+const STATIONS=[
+  {id:"endungen", n:"Die Endungen",            e:"🔤", c:"--green"},
+  {id:"singplur", n:"Einer oder mehrere?",     e:"👥", c:"--blue"},
+  {id:"td",       n:"Verben auf -t / -d",      e:"⏳", c:"--purple"},
+  {id:"umlaut",   n:"Umlaut-Verben (fahren)",  e:"🚗", c:"--pink"},
+  {id:"text",     n:"Lückentext: Spielplatz",  e:"📝", c:"--brand"},
+  {id:"meister",  n:"Personalformen-Meister",  e:"🏆", c:"--gold", master:true}
+];
+
+function renderHub(){
+  updTotal();
+  const wrap=el("div",{class:"screen"});
+  wrap.append(el("h1",{class:"hub-title"},"🗣️ Personalformen"));
+  wrap.append(el("div",{class:"hub-sub"},"Verben in die richtige Form bringen"));
+  wrap.append(mascotRow("Hallo! Ich bin <b>Willi der Wortzauberer</b> 🧙. Ich zeige dir, wie sich ein Verb je nach Person verändert: <b>ich spiele, du spielst, er spielt</b> … ✨"));
+
+  const prog=Store.getProgress();
+  if(prog && STATION_DATA[prog.id]){
+    const ps=STATIONS.find(x=>x.id===prog.id);
+    const cont=el("div",{class:"center",style:"margin:2px 0 12px"});
+    cont.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();startStation(prog.id,prog);}},
+      "▶ Weitermachen: "+(ps?ps.n:"")+" – Aufgabe "+((prog.i||0)+1)));
+    wrap.append(cont);
+  }
+
+  const grid=el("div",{class:"stations"});
+  let prevDone=true;
+  STATIONS.forEach((s,i)=>{
+    const stars=Store.stars(s.id), done=Store.data.done[s.id];
+    const locked = !prevDone && !done;
+    const card=el("div",{class:"station"+(s.master?" master":"")+(done?" done":"")+(locked?" locked":"")});
+    card.style.borderColor = done? "var(--gold)":"transparent";
+    card.append(el("span",{class:"num"},String(i+1)));
+    card.append(el("span",{class:"emoji"},s.e));
+    card.append(el("div",{class:"nm"},s.n));
+    const sd=el("div",{class:"stars"});
+    for(let k=0;k<3;k++)sd.append(el("span",{class:"s"+(k<stars?" on":"")},"★"));
+    card.append(sd);
+    if(!locked) card.addEventListener("click",()=>{Sound.click();startStation(s.id);});
+    grid.append(card);
+    prevDone = done;
+  });
+  wrap.append(grid);
+
+  const foot=el("div",{class:"center",style:"margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+  foot.append(el("button",{class:"btn gray",onclick:()=>{location.href="../../index.html";}},"← Themen"));
+  foot.append(el("button",{class:"btn gray",onclick:()=>{
+      if(confirm("Fortschritt in diesem Thema zurücksetzen?")){Store.reset();renderHub();}
+    }},"↺ Neu starten"));
+  if(Cloud.ready()){
+    foot.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();renderCodeScreen(false);}},
+      "☁️ Code: "+(SchoolCloud.code()||"—")));
+  }
+  wrap.append(foot);
+  setScreen(wrap);
+}
+
+function stationHeader(id,step){
+  const s=STATIONS.find(x=>x.id===id);
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",
+    onclick:()=>{Sound.click();renderHub();}},"← Karte"));
+  bar.append(el("div",{class:"brand"},el("span",{},s.e+" "+s.n)));
+  bar.append(el("div",{class:"steplabel"},step||""));
+  return bar;
+}
+
+function startStation(id,resume){
+  const data=STATION_DATA[id];
+  if(!data){toast("Diese Station wird noch gebaut …");return;}
+  const teach=data.teach||[];
+  const exercises=data.exercises||[];
+  let ti=0;
+  if(resume){ runExercises(id,exercises,resume); return; }
+  if(teach.length) showTeach(); else runExercises(id,exercises);
+
+  function showTeach(){
+    const card=teach[ti];
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id,"Erklärung "+(ti+1)+"/"+teach.length));
+    const body=el("div",{class:"card"});
+    if(card.render){ card.render(body); }
+    else {
+      if(card.title) body.append(el("h2",{class:"center"},card.title));
+      if(card.html)  body.append(el("div",{class:"center",html:card.html}));
+    }
+    scr.append(card.mascot? mascotRow(card.mascot,card.mood||"think"):document.createTextNode(""));
+    scr.append(body);
+    const nav=el("div",{class:"center",style:"margin-top:8px"});
+    nav.append(el("button",{class:"btn lg green",onclick:()=>{
+      Sound.click(); ti++;
+      if(ti<teach.length) showTeach(); else runExercises(id,exercises);
+    }}, ti<teach.length-1?"Weiter →":"Los, üben! 🧙"));
+    scr.append(nav);
+    setScreen(scr);
+  }
+}
+
+function runExercises(id,list,resume){
+  let i=resume && resume.i<list.length ? resume.i : 0,
+      wrongTotal=resume ? resume.wrongTotal||0 : 0;
+  const stName=()=>(STATIONS.find(s=>s.id===id)||{}).n;
+  const exLbl=()=>list[i] ? (list[i].q||("Aufgabe "+(i+1))) : "";
+  const logWrong=()=>Store.recordWrong(id,i,exLbl(),stName());
+  next();
+
+  function next(){
+    if(i>=list.length){ return finish(); }
+    Store.saveProgress({id, i, wrongTotal});
+    const ex=list[i];
+    Store.recordSeen(id,i,exLbl(),stName());
+    const scr=el("div",{class:"screen"});
+    scr.append(stationHeader(id));
+    const pr=el("div",{class:"card"});
+    const bar=el("div",{class:"progress"});const fill=el("i");bar.append(fill);
+    pr.append(bar);
+    fill.style.width=(i/list.length*100)+"%";
+    pr.append(el("div",{class:"steplabel"},"Aufgabe "+(i+1)+" von "+list.length));
+    scr.append(pr);
+
+    const host=el("div",{class:"card"});
+    scr.append(host);
+    const fb=el("div",{class:"feedback"});scr.append(fb);
+    setScreen(scr);
+
+    const api={
+      done:(ok)=>{ if(ok){ fill.style.width=((i+1)/list.length*100)+"%"; }
+        afterAnswer(ok,ex,fb,()=>{ i++; next(); }); },
+      wrong:()=>{ wrongTotal++; logWrong(); }
+    };
+    renderExercise(ex,host,api);
+  }
+
+  function afterAnswer(ok,ex,fb,cont){
+    fb.className="feedback show "+(ok?"ok":"no");
+    fb.innerHTML="";
+    fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+    const msg=el("div");
+    msg.innerHTML = ok ? pick(["Super!","Richtig! ⭐","Klasse!","Genau!","Stark gerechnet!"])
+                       : (ex.explain||"Schau nochmal genau hin und probiere es nochmal.");
+    fb.append(msg);
+    if(ok)Sound.good(); else Sound.wrong();
+    if(ok){
+      fb.append(el("button",{class:"btn green",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");cont();}},"Weiter →"));
+    }else{
+      fb.append(el("button",{class:"btn blue",style:"margin-left:auto",
+        onclick:()=>{Sound.click();fb.classList.remove("show");retry();}},"Nochmal →"));
+    }
+    function retry(){
+      const host=fb.previousSibling;
+      host.innerHTML=""; renderExercise(ex,host,{
+        done:(ok2)=>{ afterAnswer(ok2,ex,fb,()=>{i++;next();}); },
+        wrong:()=>{wrongTotal++; logWrong();}
+      });
+    }
+  }
+
+  function finish(){
+    Store.clearProgress();
+    let stars = wrongTotal===0?3 : (wrongTotal<=2?2:1);
+    Store.setStars(id,stars); updTotal();
+    const isMaster = id==="meister";
+    const scr=el("div",{class:"result screen"});
+    scr.append(stationHeader(id,"Geschafft!"));
+    const card=el("div",{class:"card center"});
+    card.append(el("div",{class:"huge"}, isMaster?"🏆 PERSONALFORMEN-MEISTER! 🏆":"Geschafft! 🎉"));
+    const st=el("div",{class:"bigstars"});
+    for(let k=0;k<3;k++)st.append(el("span",{class:"s"},"★"));
+    card.append(st);
+    card.append(el("p",{class:"big"}, stars===3?"Perfekt – alles richtig!":stars===2?"Sehr gut gerechnet!":"Geschafft – Übung macht den Meister!"));
+    if(isMaster){
+      card.append(el("div",{class:"badge"},"🏅"));
+      card.append(el("p",{html:"Du beugst Verben wie ein Profi! Du bist bereit für den Test. 🧙✨"}));
+    }
+    const nav=el("div",{style:"margin-top:10px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"});
+    nav.append(el("button",{class:"btn green lg",onclick:()=>{Sound.click();renderHub();}},"🗺️ Zur Karte"));
+    nav.append(el("button",{class:"btn blue",onclick:()=>{Sound.click();startStation(id);}},"↻ Nochmal"));
+    const idx=STATIONS.findIndex(s=>s.id===id);
+    if(idx<STATIONS.length-1){
+      nav.append(el("button",{class:"btn",onclick:()=>{Sound.click();startStation(STATIONS[idx+1].id);}},"Nächste Station →"));
+    }
+    card.append(nav);
+    scr.append(card);
+    setScreen(scr);
+    setTimeout(()=>{ const ss=$$(".bigstars .s");
+      for(let k=0;k<stars;k++)setTimeout(()=>{ss[k].classList.add("on");Sound.good();},k*350);
+    },200);
+    if(stars>=3||isMaster){Confetti.burst(isMaster?240:160);Sound.win();}
+    else if(stars===2){Confetti.burst(90);Sound.good();}
+  }
+}
+
+/* =========================================================================
+   RENDERER  (calc mit Ziffernblock)
+   ========================================================================= */
+function renderExercise(ex,host,api){ (RENDER[ex.type]||RENDER.calc)(ex,host,api); }
+const RENDER={};
+
+function numpad(host, answer, api){
+  const disp=el("div",{class:"ansbox"},"?");
+  let cur="";
+  const upd=()=>{ disp.textContent = cur===""?"?":cur; };
+  host.append(el("div",{class:"center"}, disp));
+  const pad=el("div",{class:"numpad"});
+  ["1","2","3","4","5","6","7","8","9","⌫","0","✓"].forEach(k=>{
+    const cls="numkey"+(k==="✓"?" ok":k==="⌫"?" del":"");
+    pad.append(el("button",{class:cls,onclick:()=>{ Sound.click();
+      if(k==="⌫"){ cur=cur.slice(0,-1); upd(); }
+      else if(k==="✓"){
+        if(cur===""){ toast("Gib zuerst eine Zahl ein"); return; }
+        if(parseInt(cur,10)===answer){ api.done(true); }
+        else { api.wrong(); api.done(false); }
+      } else { if(cur.length<4){ cur+=k; upd(); } }
+    }},k));
+  });
+  host.append(pad);
+}
+
+RENDER.calc=(ex,host,api)=>{
+  const eq=el("div",{class:"calc"});
+  eq.append(document.createTextNode(ex.a+" "));
+  eq.append(el("span",{class:"op"},ex.op||"·"));
+  eq.append(document.createTextNode(" "+ex.b+" = "));
+  host.append(eq);
+  numpad(host, (ex.answer!=null?ex.answer:ex.a*ex.b), api);
+};
+
+RENDER.mc=(ex,host,api)=>{
+  host.append(el("div",{class:"center big",style:"margin-bottom:10px",html:ex.q}));
+  const box=el("div",{class:"center",style:"display:flex;flex-direction:column;gap:10px;align-items:center"});
+  shuffle(ex.options).forEach(o=>{
+    box.append(el("button",{class:"btn lg",html:o.label,onclick:function(){
+      if(o.ok){ this.classList.add("green"); Sound.click(); api.done(true); }
+      else{ this.classList.add("gray"); this.setAttribute("disabled",""); Sound.wrong(); api.wrong(); api.done(false); }
+    }}));
+  });
+  host.append(box);
+};
+
+/* =========================================================================
+   INHALTE  (Personalformen – Verben je nach Person beugen)
+   ========================================================================= */
+const STATION_DATA={};
+const BLANK="<span style='display:inline-block;min-width:3.2em;border-bottom:3px solid var(--brand);margin:0 3px'>&nbsp;</span>";
+const HINT=inf=>" <span class='muted' style='font-size:.95rem'>("+inf+")</span>";
+/* Personalform wählen: Subjekt ___ (Infinitiv), 3 Wortformen zur Auswahl */
+function konj(subj,inf,correct,w1,w2,note){
+  return {type:"mc", q:"<b>"+subj+"</b> "+BLANK+HINT(inf),
+    options:[{label:correct,ok:true},{label:w1,ok:false},{label:w2,ok:false}],
+    explain: note || ("Richtig: <b>"+subj+" "+correct+"</b>.")};
+}
+/* Lückensatz: Text mit ___ an der Lücke */
+function satz(text,inf,correct,w1,w2,note){
+  return {type:"mc", q:text.replace("___",BLANK)+HINT(inf),
+    options:[{label:correct,ok:true},{label:w1,ok:false},{label:w2,ok:false}],
+    explain: note || ("Richtig: <b>"+correct+"</b>.")};
+}
+
+/* 1) Die Endungen (regelmäßige Verben, alle Personen) */
+STATION_DATA.endungen={
+  teach:[{ mascot:"Ein Verb verändert sich je nach <b>Person</b>: <b>ich spiel-e, du spiel-st, er/sie/es spiel-t, wir spiel-en, ihr spiel-t, sie spiel-en</b>.",
+    render(b){ b.append(el("h2",{class:"center"},"Die Endungen 🔤"));
+      b.append(el("div",{class:"reihe"},"ich -e · du -st · er -t · wir -en · ihr -t · sie -en")); } }],
+  exercises:[
+    konj("ich","spielen","spiele","spielst","spielt"),
+    konj("du","spielen","spielst","spielt","spiele"),
+    konj("er","machen","macht","machst","machen"),
+    konj("wir","lernen","lernen","lernt","lernst"),
+    konj("ihr","malen","malt","malen","malst"),
+    konj("die Kinder","wohnen","wohnen","wohnt","wohnst"),
+    konj("du","sagen","sagst","sagt","sage"),
+    konj("das Kind","holen","holt","holst","holen")
+  ]
+};
+/* 2) Einer oder mehrere? (Singular vs. Plural – Omars Hauptfehler) */
+STATION_DATA.singplur={
+  teach:[{ mascot:"Ganz wichtig: <b>einer</b> → Endung <b>-t</b> (Hanna spiel<b>t</b>). <b>Mehrere</b> → Endung <b>-en</b> (Die Kinder spiel<b>en</b>). Schau genau: einer oder mehrere?",
+    render(b){ b.append(el("h2",{class:"center"},"Einer oder mehrere? 👥"));
+      b.append(el("div",{class:"reihe"},"Hanna spielt · Die Kinder spielen")); } }],
+  exercises:[
+    konj("Hanna","spielen","spielt","spielen","spiele","<b>Einer</b> → spiel<b>t</b>."),
+    konj("Die Kinder","spielen","spielen","spielt","spielst","<b>Mehrere</b> → spiel<b>en</b>."),
+    konj("Hanna und Amira","laufen","laufen","läuft","läufst","<b>Mehrere</b> → lauf<b>en</b> (kein Umlaut)."),
+    konj("Amira","klettern","klettert","klettern","kletterst","<b>Einer</b> → klettert."),
+    konj("Mama","holen","holt","holen","holst","<b>Einer</b> → holt."),
+    konj("Die Hunde","bellen","bellen","bellt","bellst","<b>Mehrere</b> → bellen."),
+    konj("Tom","malen","malt","malen","malst","<b>Einer</b> → malt."),
+    konj("Die Mädchen","singen","singen","singt","singst","<b>Mehrere</b> → singen.")
+  ]
+};
+/* 3) Verben auf -t / -d (du wartest, er wartet) */
+STATION_DATA.td={
+  teach:[{ mascot:"Endet der Verbstamm auf <b>t</b> oder <b>d</b>, schiebt man ein <b>e</b> ein: <b>warten</b> → du wart<b>est</b>, er wart<b>et</b>, ihr wart<b>et</b>.",
+    render(b){ b.append(el("h2",{class:"center"},"Verben auf -t / -d ⏳"));
+      b.append(el("div",{class:"reihe"},"du wartest · er wartet · ihr wartet")); } }],
+  exercises:[
+    konj("du","warten","wartest","wartst","wartet"),
+    konj("er","warten","wartet","wart","warte"),
+    konj("ihr","arbeiten","arbeitet","arbeitt","arbeitest"),
+    konj("du","finden","findest","findst","findet"),
+    konj("Mama","baden","badet","badt","bade"),
+    konj("er","reden","redet","redt","rede"),
+    konj("du","antworten","antwortest","antwortst","antwortet"),
+    konj("ihr","warten","wartet","wartt","wartest")
+  ]
+};
+/* 4) Umlaut-Verben (fahren → fährt, laufen → läuft) */
+STATION_DATA.umlaut={
+  teach:[{ mascot:"Manche Verben bekommen bei <b>du</b> und <b>er/sie/es</b> einen <b>Umlaut</b>: <b>fahren</b> → du f<b>ä</b>hrst, er f<b>ä</b>hrt. <b>laufen</b> → du l<b>äu</b>fst, er l<b>äu</b>ft. Bei wir/ihr/sie bleibt es gleich!",
+    render(b){ b.append(el("h2",{class:"center"},"Umlaut-Verben 🚗"));
+      b.append(el("div",{class:"reihe"},"du fährst · er fährt · wir fahren")); } }],
+  exercises:[
+    konj("du","fahren","fährst","fahrst","fährt"),
+    konj("er","fahren","fährt","fahrt","fährst"),
+    konj("Hanna","laufen","läuft","lauft","laufen"),
+    konj("du","laufen","läufst","laufst","läuft"),
+    konj("wir","fahren","fahren","fähren","fahrt","Bei <b>wir</b> gibt es <b>keinen</b> Umlaut: fahren."),
+    konj("er","essen","isst","esst","esse"),
+    konj("du","lesen","liest","lest","liesst"),
+    konj("er","schlafen","schläft","schlaft","schläfst")
+  ]
+};
+/* 5) Lückentext: Ein Tag auf dem Spielplatz (wie in Omars Test) */
+STATION_DATA.text={
+  teach:[{ mascot:"Jetzt wie im Test: <b>Ein Tag auf dem Spielplatz</b>. Setze das Verb in der richtigen Form ein. Denk an die Person – einer oder mehrere? 📝",
+    render(b){ b.append(el("h2",{class:"center"},"Lückentext: Spielplatz 📝"));
+      b.append(el("div",{class:"center big"},"Welche Verbform passt?")); } }],
+  exercises:[
+    satz("Hanna und Amira ___ heute zum Spielplatz.","laufen","laufen","läuft","lauft","<b>Mehrere</b> → laufen."),
+    satz("Zuerst ___ Hanna zur Schaukel.","laufen","läuft","laufen","lauft","<b>Einer</b> (Hanna) → läuft."),
+    satz("Amira ___ daneben.","warten","wartet","warten","wartest","Einer → wartet (mit e)."),
+    satz("Hanna ___ hoch.","schaukeln","schaukelt","schaukeln","schaukelst","Einer → schaukelt."),
+    satz("Dann ___ Amira auf den Turm.","klettern","klettert","klettern","kletterst","Einer → klettert."),
+    satz("Im Sand ___ beide eine Burg.","bauen","bauen","baut","baust","<b>beide</b> = mehrere → bauen."),
+    satz("Hanna ___ einen Eimer.","füllen","füllt","füllen","füllst","Einer → füllt."),
+    satz("Zum Schluss ___ beide einen Apfel.","essen","essen","isst","esst","<b>beide</b> = mehrere → essen.")
+  ]
+};
+/* 6) Meister: alles gemischt */
+STATION_DATA.meister={
+  teach:[{ mascot:"Jetzt <b>alles gemischt</b> – Endungen, einer/mehrere, -t/-d und Umlaut-Verben. Zeig, dass du ein <b>Personalformen-Meister</b> bist! 🏆", mood:"cheer",
+    render(b){ b.append(el("h2",{class:"center"},"🏆 Personalformen-Meister 🏆"));
+      b.append(el("div",{class:"center big"},"Aufgaben aus allen Stationen.")); } }],
+  exercises:[
+    konj("du","spielen","spielst","spielt","spiele"),
+    konj("Die Kinder","lachen","lachen","lacht","lachst"),
+    konj("er","warten","wartet","wartt","warte"),
+    konj("du","fahren","fährst","fahrst","fährt"),
+    konj("Hanna","laufen","läuft","laufen","lauft"),
+    satz("Wir ___ ein Bild.","malen","malen","malt","malst"),
+    konj("ihr","essen","esst","isst","essen"),
+    satz("Zum Schluss ___ Tom nach Hause.","laufen","läuft","laufen","lauft")
+  ]
+};
+
+function routeStart(){
+  updTotal();
+  const r=Store.getProgress();
+  if(r && STATION_DATA[r.id]) startStation(r.id,r);
+  else renderHub();
+}
+
+$("#soundBtn").addEventListener("click",function(){
+  const on=!Sound.get();Sound.set(on);this.textContent=on?"🔊":"🔇";if(on)Sound.click();
+});
+
+/* ---- Einzelne Frage aus dem Elternbericht üben ------------------------- */
+const TOPIC_ID="personalformen";
+let practiceTimer=null;
+function runPractice(stationId, exi){
+  clearTimeout(practiceTimer);
+  const data=STATION_DATA[stationId];
+  const ex = data && data.exercises && data.exercises[+exi];
+  const back=()=>{ clearTimeout(practiceTimer); location.href="../../index.html#report"; };
+  if(!ex){ back(); return; }
+  function goNext(){
+    clearTimeout(practiceTimer);
+    const open=SchoolCloud.openQuestions();
+    if(open.length===0){ back(); return; }
+    const nx=open.filter(q=>q.topic===TOPIC_ID)[0]||open[0];
+    if(nx.topic===TOPIC_ID) runPractice(nx.station, nx.exi);
+    else location.href="../"+nx.topic+"/index.html#practice="+encodeURIComponent(nx.station+":"+nx.exi);
+  }
+  const scr=el("div",{class:"screen"});
+  const bar=el("div",{class:"topbar",style:"margin-bottom:10px"});
+  bar.append(el("button",{class:"btn gray",style:"padding:8px 16px;font-size:1rem",onclick:back},"← Bericht"));
+  bar.append(el("div",{class:"brand"},el("span",{},"🔁 Üben")));
+  const openNow=SchoolCloud.openQuestions().length;
+  bar.append(el("div",{class:"steplabel"}, openNow>1 ? ("noch "+openNow+" offen") : ((STATIONS.find(s=>s.id===stationId)||{}).n||"")));
+  scr.append(bar);
+  scr.append(mascotRow("Rechne diese Aufgabe noch einmal – du schaffst das! 💪","think"));
+  const host=el("div",{class:"card"}); scr.append(host);
+  const fb=el("div",{class:"feedback"}); scr.append(fb);
+  setScreen(scr);
+  render();
+  function render(){
+    host.innerHTML="";
+    renderExercise(ex, host, {
+      done:(ok)=>{
+        fb.className="feedback show "+(ok?"ok":"no"); fb.innerHTML="";
+        fb.append(el("span",{class:"fi"},ok?"🎉":"💡"));
+        const msg=el("div"); msg.innerHTML = ok ? "Richtig gerechnet! Klasse! ⭐" : (ex.explain||"Schau nochmal genau hin und probiere es nochmal."); fb.append(msg);
+        if(ok){ Sound.good(); Store.clearStat(stationId, exi);
+          const more = SchoolCloud.openQuestions().length>0;
+          fb.append(el("button",{class:"btn green",style:"margin-left:auto",onclick:goNext}, more?"Weiter →":"✓ Fertig – zum Bericht"));
+          practiceTimer=setTimeout(goNext, 1500);
+        } else { Sound.wrong();
+          fb.append(el("button",{class:"btn blue",style:"margin-left:auto",onclick:()=>{fb.classList.remove("show"); render();}},"Nochmal →"));
+        }
+      },
+      wrong:()=>{}
+    });
+  }
+}
+
+function startHere(){
+  const m=/^#practice=([^:]+):(\d+)$/.exec(decodeURIComponent(location.hash||""));
+  if(m){ history.replaceState(null,"",location.pathname); runPractice(m[1], m[2]); return; }
+  routeStart();
+}
+SchoolCloud.bootSync(startHere);
+
+if("serviceWorker" in navigator){ window.addEventListener("load",()=>navigator.serviceWorker.register("../../sw.js").catch(()=>{})); }
+
+(function clouds(){const b=document.body;for(let i=0;i<4;i++){const c=el("div",{class:"cloud"});
+  c.style.top=(8+i*16)+"%";c.style.width=(60+rnd(0,60))+"px";c.style.height=(20+rnd(0,14))+"px";
+  c.style.animationDuration=(40+rnd(0,40))+"s";c.style.animationDelay=(-rnd(0,40))+"s";b.append(c);}})();
+</script>
+</body>
+</html>
